@@ -5,6 +5,7 @@ import { LanguageSelector } from '@/components/language-selector';
 import { SummaryDisplay } from '@/components/summary-display';
 import { Header } from '@/components/header';
 import { Footer } from '@/components/footer';
+import { ConnectionTest } from '@/components/connection-test';
 import { motion } from 'framer-motion';
 
 export default function Home() {
@@ -30,6 +31,11 @@ export default function Home() {
               <p className="text-muted-foreground text-lg md:text-xl mt-4 max-w-2xl mx-auto">
                 Transform your videos into concise, multilingual summaries with sentiment analysis and text-to-speech
               </p>
+              
+              {/* Backend connection test */}
+              <div className="mt-4">
+                <ConnectionTest />
+              </div>
             </motion.div>
           </section>
           

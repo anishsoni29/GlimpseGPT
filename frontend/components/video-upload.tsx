@@ -9,12 +9,28 @@ import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card } from "@/components/ui/card";
 
+// Define backend URL
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
 export function VideoUpload() {
   const [url, setUrl] = useState("");
   const [progress, setProgress] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const { toast } = useToast();
+
+  // Validate YouTube URL
+  const isValidYoutubeUrl = (url: string) => {
+    const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})(.*)$/;
+    return youtubeRegex.test(url);
+  };
+
+  // Extract YouTube ID from URL
+  const getYoutubeId = (url: string) => {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,35 +43,116 @@ export function VideoUpload() {
       return;
     }
 
+    if (!isValidYoutubeUrl(url)) {
+      toast({
+        title: "Error",
+        description: "Please enter a valid YouTube URL",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Get the YouTube ID and convert to a standard URL format
+    const youtubeId = getYoutubeId(url);
+    if (!youtubeId) {
+      toast({
+        title: "Error",
+        description: "Could not extract valid YouTube video ID",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const standardUrl = `https://www.youtube.com/watch?v=${youtubeId}`;
+
     setIsProcessing(true);
     setProgress(0);
+    let progressInterval: NodeJS.Timeout | undefined = undefined;
 
     try {
-      const response = await fetch('/api/summarize', {
+      // Start progress animation
+      progressInterval = setInterval(() => {
+        setProgress(prev => {
+          // Only increase up to 90% during processing
+          if (prev < 90) return prev + 5;
+          return prev;
+        });
+      }, 500);
+
+      console.log("Sending request to", `${BACKEND_URL}/api/summarize`);
+      
+      // Create a properly formatted request body
+      const requestData = {
+        url: standardUrl,
+        language: localStorage.getItem('preferredLanguage') || 'English'
+      };
+      
+      console.log("Request body:", requestData);
+
+      // Use URLSearchParams for file-less requests
+      const response = await fetch(`${BACKEND_URL}/api/summarize`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json'
         },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify(requestData),
       });
-
-      if (!response.ok) throw new Error('Failed to process video');
+      
+      if (progressInterval) clearInterval(progressInterval);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = 'Failed to process video';
+        
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          // If not valid JSON, use the raw text
+          errorMessage = errorText || errorMessage;
+        }
+        
+        throw new Error(errorMessage);
+      }
 
       const data = await response.json();
+      
+      // Ensure progress completes to 100%
+      setProgress(100);
+      
+      // Save response data to localStorage
+      localStorage.setItem('summaryData', JSON.stringify(data));
+      
+      // Trigger custom storage event for components that need to react to this change
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'summaryData',
+        newValue: JSON.stringify(data)
+      }));
+      
+      // Also dispatch a custom event for direct component communication
+      const customEvent = new CustomEvent('summaryUpdated', { detail: data });
+      window.dispatchEvent(customEvent);
       
       toast({
         title: "Success",
         description: "Video processed successfully",
       });
     } catch (error) {
+      if (progressInterval) clearInterval(progressInterval);
+      setProgress(0);
       toast({
         title: "Error",
-        description: "Failed to process video",
+        description: error instanceof Error ? error.message : "Failed to process video",
         variant: "destructive",
       });
+      console.error("Processing error:", error);
     } finally {
       setIsProcessing(false);
-      setProgress(0);
+      // Only reset progress after a delay if it completed successfully
+      if (progress === 100) {
+        setTimeout(() => setProgress(0), 1000);
+      }
     }
   };
 
@@ -77,31 +174,82 @@ export function VideoUpload() {
     
     if (audioFile) {
       setIsProcessing(true);
+      setProgress(0);
+      let progressInterval: NodeJS.Timeout | undefined = undefined;
+      
       try {
+        progressInterval = setInterval(() => {
+          setProgress(prev => {
+            // Only increase up to 90% during processing
+            if (prev < 90) return prev + 5;
+            return prev;
+          });
+        }, 500);
+        
         const formData = new FormData();
         formData.append('file', audioFile);
+        formData.append('language', localStorage.getItem('preferredLanguage') || 'English');
         
-        const interval = setInterval(() => {
-          setProgress(prev => Math.min(prev + 10, 90));
-        }, 500);
-
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        clearInterval(interval);
+        console.log("Sending file upload to", `${BACKEND_URL}/api/summarize`);
+        
+        const response = await fetch(`${BACKEND_URL}/api/summarize`, {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (progressInterval) clearInterval(progressInterval);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          let errorMessage = 'Failed to process file';
+          
+          try {
+            const errorData = JSON.parse(errorText);
+            errorMessage = errorData.detail || errorMessage;
+          } catch {
+            // If not valid JSON, use the raw text
+            errorMessage = errorText || errorMessage;
+          }
+          
+          throw new Error(errorMessage);
+        }
+        
+        const data = await response.json();
+        
+        // Ensure progress completes to 100%
         setProgress(100);
+        
+        // Save response data to localStorage
+        localStorage.setItem('summaryData', JSON.stringify(data));
+        // Trigger storage event
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: 'summaryData',
+          newValue: JSON.stringify(data)
+        }));
+        
+        // Also dispatch a custom event for direct component communication
+        const customEvent = new CustomEvent('summaryUpdated', { detail: data });
+        window.dispatchEvent(customEvent);
         
         toast({
           title: "Success",
           description: "File processed successfully",
         });
       } catch (error) {
+        if (progressInterval) clearInterval(progressInterval);
+        setProgress(0);
+        console.error('File processing error:', error);
         toast({
           title: "Error",
-          description: "Failed to process file",
+          description: error instanceof Error ? error.message : "Failed to process file",
           variant: "destructive",
         });
       } finally {
         setIsProcessing(false);
-        setProgress(0);
+        // Only reset progress after a delay if it completed successfully
+        if (progress === 100) {
+          setTimeout(() => setProgress(0), 1000);
+        }
       }
     } else {
       toast({
@@ -126,7 +274,7 @@ export function VideoUpload() {
           <div className="relative flex-1">
             <Input
               type="url"
-              placeholder="Enter YouTube URL"
+              placeholder="https://www.youtube.com/watch?v=..."
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               disabled={isProcessing}

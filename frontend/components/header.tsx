@@ -11,7 +11,7 @@ export function Header() {
     <header className="border-b bg-card">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
         <div className="flex items-center space-x-4">
-          <h2 className="text-2xl font-bold text-foreground">VS</h2>
+          <h2 className="text-2xl font-bold text-foreground">Glimpse</h2>
         </div>
         
         <div className="flex items-center space-x-4">

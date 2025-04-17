@@ -1,0 +1,13 @@
+fastapi==0.104.1
+uvicorn==0.23.2
+python-multipart==0.0.6
+yt-dlp==2023.11.16
+SpeechRecognition==3.10.0
+transformers==4.35.2
+torch==2.1.1
+pydub==0.25.1
+pyttsx3==2.90
+matplotlib==3.8.2
+python-dotenv==1.0.0
+sentencepiece==0.1.99
+tokenizers==0.15.0 
