@@ -10,9 +10,15 @@ import {
   PauseCircle, 
   PlayCircle, 
   Download, 
-  BarChart4
+  BarChart4,
+  FileText,
+  Languages,
+  RefreshCw
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { motion, AnimatePresence } from "framer-motion";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 // Type definition for the summary data
 interface SummaryData {
@@ -24,12 +30,15 @@ interface SummaryData {
     label: string;
     score: number;
   };
+  thumbnail_url?: string;
+  title?: string;
 }
 
 export function SummaryDisplay() {
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeTab, setActiveTab] = useState("summary");
+  const [isAnimating, setIsAnimating] = useState(false);
   const { toast } = useToast();
   
   // Function for copying text to clipboard
@@ -47,7 +56,7 @@ export function SummaryDisplay() {
       () => {
         toast({
           title: "Copied to clipboard",
-          description: "Summary copied to clipboard successfully",
+          description: "Text copied successfully",
         });
       },
       (err) => {
@@ -166,19 +175,35 @@ export function SummaryDisplay() {
     }
     
     return (
-      <div className="space-y-2 mt-4 p-3 border rounded-lg">
+      <motion.div 
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="space-y-2 mt-4 p-4 border rounded-lg bg-card/50"
+      >
         <div className="flex justify-between items-center">
-          <span className="text-sm font-medium">Sentiment: {label} {emoji}</span>
+          <span className="text-sm font-medium flex items-center gap-1.5">
+            <Badge variant={label.toLowerCase() === 'positive' ? 'default' : label.toLowerCase() === 'negative' ? 'destructive' : 'secondary'}>
+              {emoji} {label}
+            </Badge>
+          </span>
           <span className="text-sm font-medium">{percentage}% confidence</span>
         </div>
-        <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-          <div 
-            className={`h-full ${color} rounded-full transition-all duration-500 ease-in-out`}
-            style={{ width: `${percentage}%` }}
+        <div className="h-3 w-full bg-secondary rounded-full overflow-hidden">
+          <motion.div 
+            initial={{ width: '0%' }}
+            animate={{ width: `${percentage}%` }}
+            transition={{ duration: 1.5, ease: "easeOut" }}
+            className={`h-full ${color} rounded-full`}
           />
         </div>
-      </div>
+      </motion.div>
     );
+  };
+
+  // Function to handle summary reload animation
+  const triggerReloadAnimation = () => {
+    setIsAnimating(true);
+    setTimeout(() => setIsAnimating(false), 1000);
   };
 
   // Listen for summary data updates via window storage event and custom event
@@ -188,7 +213,7 @@ export function SummaryDisplay() {
         try {
           const data = JSON.parse(event.newValue);
           setSummaryData(data);
-          console.log("Summary data updated from storage event", data);
+          triggerReloadAnimation();
         } catch (e) {
           console.error('Failed to parse summary data', e);
         }
@@ -199,7 +224,7 @@ export function SummaryDisplay() {
     const handleCustomEvent = (event: CustomEvent<SummaryData>) => {
       if (event.detail) {
         setSummaryData(event.detail);
-        console.log("Summary data updated from custom event", event.detail);
+        triggerReloadAnimation();
       }
     };
     
@@ -212,7 +237,6 @@ export function SummaryDisplay() {
       try {
         const parsedData = JSON.parse(savedData);
         setSummaryData(parsedData);
-        console.log("Loaded saved summary data", parsedData);
       } catch (e) {
         console.error('Failed to parse saved summary data', e);
       }
@@ -232,9 +256,14 @@ export function SummaryDisplay() {
   // No content state
   if (!summaryData || !summaryData.summary_translated) {
     return (
-      <Card className="p-6 bg-card min-h-[300px] flex items-center justify-center">
+      <Card className="p-6 bg-card min-h-[300px] flex flex-col items-center justify-center">
         <div className="text-center space-y-4">
-          <FileAudio className="mx-auto h-12 w-12 text-muted-foreground opacity-50" />
+          <motion.div
+            animate={{ rotate: [0, 5, 0, -5, 0] }}
+            transition={{ repeat: Infinity, duration: 5, ease: "easeInOut" }}
+          >
+            <FileAudio className="mx-auto h-12 w-12 text-muted-foreground opacity-50" />
+          </motion.div>
           <p className="text-muted-foreground">
             Process a video to see your summary here
           </p>
@@ -244,70 +273,133 @@ export function SummaryDisplay() {
   }
 
   return (
-    <Card className="p-6 bg-card">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <div className="flex justify-between items-center">
-          <TabsList>
-            <TabsTrigger value="summary">Summary</TabsTrigger>
-            <TabsTrigger value="transcript">Full Transcript</TabsTrigger>
-          </TabsList>
-          
-          <div className="flex gap-2">
-            <Button
-              size="icon"
-              variant="outline"
-              onClick={handlePlayPause}
-              title={isPlaying ? "Pause TTS" : "Play TTS"}
-            >
-              {isPlaying ? (
-                <PauseCircle className="h-5 w-5" />
-              ) : (
-                <PlayCircle className="h-5 w-5" />
-              )}
-            </Button>
-            <Button
-              size="icon"
-              variant="outline"
-              onClick={() => copyToClipboard(
-                activeTab === "summary" 
-                  ? summaryData.summary_translated || "" 
-                  : summaryData.original_text || ""
-              )}
-              title="Copy to clipboard"
-            >
-              <Copy className="h-5 w-5" />
-            </Button>
-            <Button
-              size="icon"
-              variant="outline"
-              onClick={downloadSummary}
-              title="Download summary"
-            >
-              <Download className="h-5 w-5" />
-            </Button>
-          </div>
-        </div>
-        
-        <TabsContent value="summary" className="space-y-4">
-          <div className="whitespace-pre-wrap text-foreground">
-            {summaryData.summary_translated}
-          </div>
-          
-          {renderSentimentVisual()}
-          
-          {summaryData.language && summaryData.language !== 'English' && (
-            <div className="text-xs text-muted-foreground mt-2">
-              Translated to: {summaryData.language}
+    <motion.div
+      animate={isAnimating ? { scale: [1, 1.01, 1] } : {}}
+      transition={{ duration: 0.5 }}
+    >
+      <Card className="overflow-hidden bg-card">
+        <div className="p-6 space-y-4">
+          <div className="flex justify-between items-start">
+            <div>
+              <h3 className="text-xl font-semibold text-foreground">Summary</h3>
+              <div className="flex items-center gap-2 mt-1">
+                <Badge variant="outline" className="text-xs">
+                  <Languages className="h-3 w-3 mr-1" />
+                  {summaryData.language || 'English'}
+                </Badge>
+                {summaryData.sentiment && (
+                  <Badge 
+                    variant={summaryData.sentiment.label.toLowerCase() === 'positive' ? 'default' : summaryData.sentiment.label.toLowerCase() === 'negative' ? 'destructive' : 'secondary'}
+                    className="text-xs"
+                  >
+                    {summaryData.sentiment.label}
+                  </Badge>
+                )}
+              </div>
             </div>
-          )}
-        </TabsContent>
-        
-        <TabsContent value="transcript" className="space-y-4">
-          <div className="whitespace-pre-wrap text-foreground max-h-[500px] overflow-y-auto">
-            {summaryData.original_text}
+            <div className="flex gap-1">
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={handlePlayPause}
+                className="h-8 w-8 rounded-full"
+              >
+                {isPlaying ? (
+                  <PauseCircle className="h-4 w-4" />
+                ) : (
+                  <PlayCircle className="h-4 w-4" />
+                )}
+              </Button>
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={() => copyToClipboard(summaryData.summary_translated || '')}
+                className="h-8 w-8 rounded-full"
+              >
+                <Copy className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={downloadSummary}
+                className="h-8 w-8 rounded-full"
+              >
+                <Download className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
-        </TabsContent>
-      </Tabs>
-    </Card>
+
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+            <TabsList className="grid grid-cols-3">
+              <TabsTrigger value="summary" className="flex items-center gap-1.5">
+                <FileText className="h-4 w-4" />
+                Summary
+              </TabsTrigger>
+              <TabsTrigger value="transcript" className="flex items-center gap-1.5">
+                <RefreshCw className="h-4 w-4" />
+                Transcript
+              </TabsTrigger>
+              <TabsTrigger value="sentiment" className="flex items-center gap-1.5">
+                <BarChart4 className="h-4 w-4" />
+                Sentiment
+              </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="summary" className="space-y-4 mt-4">
+              <ScrollArea className="h-[300px] rounded-md border p-4">
+                <div className="space-y-2 text-pretty">
+                  {summaryData.summary_translated?.split('\n').map((paragraph, i) => (
+                    <p key={i} className={paragraph.trim() === '' ? 'h-4' : ''}>
+                      {paragraph}
+                    </p>
+                  ))}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="transcript" className="space-y-4 mt-4">
+              <ScrollArea className="h-[300px] rounded-md border p-4">
+                <div className="space-y-2 text-pretty">
+                  {summaryData.original_text ? (
+                    summaryData.original_text.split('\n').map((paragraph, i) => (
+                      <p key={i} className={paragraph.trim() === '' ? 'h-4' : ''}>
+                        {paragraph}
+                      </p>
+                    ))
+                  ) : (
+                    <p className="text-muted-foreground">No transcript available</p>
+                  )}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="sentiment" className="space-y-4 mt-4">
+              <div className="p-4 rounded-md border h-[300px] flex flex-col justify-center">
+                {summaryData.sentiment ? (
+                  <div className="space-y-6">
+                    {renderSentimentVisual()}
+                    <div className="p-4 rounded-md bg-muted/50">
+                      <h4 className="text-sm font-medium mb-2">What this means:</h4>
+                      <p className="text-sm text-muted-foreground">
+                        {summaryData.sentiment.label === 'Positive' ? 
+                          'The content has a primarily positive tone, expressing favorable or optimistic sentiments.' :
+                          summaryData.sentiment.label === 'Negative' ?
+                            'The content has a primarily negative tone, expressing unfavorable or pessimistic sentiments.' :
+                            'The content has a balanced or neutral tone, without strong positive or negative sentiments.'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center text-muted-foreground">
+                    No sentiment analysis available
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+          </Tabs>
+        </div>
+      </Card>
+    </motion.div>
   );
 }

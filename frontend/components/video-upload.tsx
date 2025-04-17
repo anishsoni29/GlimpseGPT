@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Upload, X, FileAudio, Youtube } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card } from "@/components/ui/card";
+import { v4 as uuidv4 } from 'uuid';
 
 // Define backend URL
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
@@ -31,6 +32,62 @@ export function VideoUpload() {
     const match = url.match(regExp);
     return (match && match[2].length === 11) ? match[2] : null;
   };
+
+  // Function to add video to history
+  const addToHistory = (videoUrl: string, videoId: string, language: string) => {
+    try {
+      const historyItem = {
+        id: uuidv4(),
+        title: `YouTube Video ${videoId}`,
+        thumbnailUrl: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+        url: videoUrl,
+        timestamp: Date.now(),
+        language: language
+      };
+      
+      // Get existing history
+      const savedHistory = localStorage.getItem('videoHistory');
+      let history = [];
+      
+      if (savedHistory) {
+        try {
+          const parsedHistory = JSON.parse(savedHistory);
+          history = Array.isArray(parsedHistory) ? parsedHistory : [];
+        } catch (error) {
+          console.error('Failed to parse video history', error);
+        }
+      }
+      
+      // Add new item to the beginning and limit to 10 items
+      history = [historyItem, ...history].slice(0, 10);
+      
+      // Save back to localStorage
+      localStorage.setItem('videoHistory', JSON.stringify(history));
+    } catch (error) {
+      console.error('Failed to save to history', error);
+    }
+  };
+
+  // Listen for reprocessing requests from VideoHistory
+  useEffect(() => {
+    const handleReprocessVideo = (event: CustomEvent<{url: string, language: string}>) => {
+      if (event.detail && event.detail.url) {
+        setUrl(event.detail.url);
+        
+        // Set a timeout to allow the state to update before submitting
+        setTimeout(() => {
+          const form = document.querySelector('form') as HTMLFormElement;
+          if (form) form.dispatchEvent(new Event('submit', { cancelable: true }));
+        }, 100);
+      }
+    };
+    
+    window.addEventListener('reprocessVideo', handleReprocessVideo as EventListener);
+    
+    return () => {
+      window.removeEventListener('reprocessVideo', handleReprocessVideo as EventListener);
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,6 +121,7 @@ export function VideoUpload() {
     }
 
     const standardUrl = `https://www.youtube.com/watch?v=${youtubeId}`;
+    const language = localStorage.getItem('preferredLanguage') || 'English';
 
     setIsProcessing(true);
     setProgress(0);
@@ -79,15 +137,14 @@ export function VideoUpload() {
         });
       }, 500);
 
-      console.log("Sending request to", `${BACKEND_URL}/api/summarize`);
-      
       // Create a properly formatted request body
       const requestData = {
         url: standardUrl,
-        language: localStorage.getItem('preferredLanguage') || 'English'
+        language
       };
-      
-      console.log("Request body:", requestData);
+
+      // Add to history before processing
+      addToHistory(standardUrl, youtubeId, language);
 
       // Use URLSearchParams for file-less requests
       const response = await fetch(`${BACKEND_URL}/api/summarize`, {
@@ -186,11 +243,38 @@ export function VideoUpload() {
           });
         }, 500);
         
+        const language = localStorage.getItem('preferredLanguage') || 'English';
         const formData = new FormData();
         formData.append('file', audioFile);
-        formData.append('language', localStorage.getItem('preferredLanguage') || 'English');
+        formData.append('language', language);
         
-        console.log("Sending file upload to", `${BACKEND_URL}/api/summarize`);
+        // Add to history with local file
+        const fileId = uuidv4();
+        const historyItem = {
+          id: fileId,
+          title: audioFile.name || 'Uploaded file',
+          thumbnailUrl: '',  // No thumbnail for local files
+          url: `file-${fileId}`,  // We can't reuse the actual file
+          timestamp: Date.now(),
+          language
+        };
+        
+        // Get existing history
+        const savedHistory = localStorage.getItem('videoHistory');
+        let history = [];
+        
+        if (savedHistory) {
+          try {
+            const parsedHistory = JSON.parse(savedHistory);
+            history = Array.isArray(parsedHistory) ? parsedHistory : [];
+          } catch (error) {
+            console.error('Failed to parse video history', error);
+          }
+        }
+        
+        // Add new item to the beginning and limit to 10 items
+        history = [historyItem, ...history].slice(0, 10);
+        localStorage.setItem('videoHistory', JSON.stringify(history));
         
         const response = await fetch(`${BACKEND_URL}/api/summarize`, {
           method: 'POST',
