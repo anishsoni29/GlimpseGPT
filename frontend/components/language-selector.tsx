@@ -1,71 +1,129 @@
 "use client";
 
-import * as React from "react";
-import { Check, Languages } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+import { useEffect, useState } from "react";
+import { 
+  Globe, 
+  Check,
+  ChevronDown,
+  Languages
+} from "lucide-react";
+import { 
+  Select, 
+  SelectContent, 
+  SelectGroup, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
 } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
+import { motion, AnimatePresence } from "framer-motion";
 
-// Match the languages supported by the backend
-const LANGUAGE_OPTIONS = [
-  { value: "English", label: "English" },
-  { value: "Hindi", label: "Hindi" },
-  { value: "Tamil", label: "Tamil" },
-  { value: "Marathi", label: "Marathi" },
+const languages = [
+  { code: "English", name: "English", flag: "🇺🇸" },
+  { code: "Hindi", name: "हिन्दी", flag: "🇮🇳" },
+  { code: "Tamil", name: "தமிழ்", flag: "🇮🇳" },
+  { code: "Marathi", name: "मराठी", flag: "🇮🇳" },
 ];
 
-interface LanguageSelectorProps {
-  onChange?: (language: string) => void;
-}
+export function LanguageSelector() {
+  const [selectedLanguage, setSelectedLanguage] = useState("English");
+  const [isOpen, setIsOpen] = useState(false);
 
-export function LanguageSelector({ onChange }: LanguageSelectorProps) {
-  const [language, setLanguage] = React.useState("English");
-
-  const handleLanguageChange = (value: string) => {
-    setLanguage(value);
-    if (onChange) {
-      onChange(value);
-    }
-    // You could also store the selected language in localStorage
-    localStorage.setItem('preferredLanguage', value);
-  };
-
-  // Load preferred language from localStorage on component mount
-  React.useEffect(() => {
-    const storedLanguage = localStorage.getItem('preferredLanguage');
-    if (storedLanguage) {
-      setLanguage(storedLanguage);
+  // Load saved language preference on mount
+  useEffect(() => {
+    const savedLanguage = localStorage.getItem('preferredLanguage');
+    if (savedLanguage) {
+      setSelectedLanguage(savedLanguage);
     }
   }, []);
 
+  // Handle language change
+  const handleLanguageChange = (value: string) => {
+    setSelectedLanguage(value);
+    localStorage.setItem('preferredLanguage', value);
+    
+    // Notify other components about the language change
+    window.dispatchEvent(new Event('languageChange'));
+  };
+
   return (
-    <Card className="p-6 bg-card">
-      <div className="space-y-4">
-        <div className="flex items-center space-x-2">
-          <Languages className="h-5 w-5 text-muted-foreground" />
-          <Label htmlFor="language" className="text-base font-medium">
-            Summary Language
-          </Label>
+    <div className="relative">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="backdrop-blur-xl bg-black/30 p-6 rounded-xl border border-white/10 shadow-xl"
+      >
+        <div className="flex items-center gap-3 mb-4">
+          <motion.div 
+            initial={{ rotate: 0 }}
+            animate={{ rotate: [0, 15, -15, 0] }}
+            transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 5 }}
+            className="rounded-full bg-indigo-500/20 p-2"
+          >
+            <Languages className="h-5 w-5 text-indigo-400" />
+          </motion.div>
+          <span className="text-lg font-semibold text-white">Translation Language</span>
         </div>
-        <Select value={language} onValueChange={handleLanguageChange}>
-          <SelectTrigger id="language" className="bg-background">
-            <SelectValue placeholder="Select language" />
+        
+        <Select value={selectedLanguage} onValueChange={handleLanguageChange}>
+          <SelectTrigger 
+            className="w-full bg-black/40 border-white/10 text-white backdrop-blur-md transition-all hover:bg-black/60 focus:ring-indigo-500/50"
+            onClick={() => setIsOpen(!isOpen)}
+          >
+            <SelectValue>
+              <div className="flex items-center gap-2">
+                <span className="text-xl">{languages.find(l => l.code === selectedLanguage)?.flag}</span>
+                <span>{languages.find(l => l.code === selectedLanguage)?.name}</span>
+              </div>
+            </SelectValue>
           </SelectTrigger>
-          <SelectContent>
-            {LANGUAGE_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
+          
+          <SelectContent className="bg-black/80 backdrop-blur-xl border-white/10 text-white">
+            <SelectGroup>
+              {languages.map((language) => (
+                <SelectItem 
+                  key={language.code} 
+                  value={language.code}
+                  className="hover:bg-white/10 focus:bg-white/10 cursor-pointer"
+                >
+                  <motion.div 
+                    initial={{ opacity: 0.5, x: -5 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="flex items-center gap-2"
+                  >
+                    <span className="text-xl">{language.flag}</span>
+                    <span>{language.name}</span>
+                  </motion.div>
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
-      </div>
-    </Card>
+        
+        <p className="text-white/60 text-sm mt-4">
+          Choose the language for your summaries and analysis
+        </p>
+        
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="mt-4 flex justify-end"
+        >
+          <a 
+            href="#demo" 
+            className="flex items-center gap-2 text-indigo-400 hover:text-indigo-300 transition-colors group"
+          >
+            <span>Try it now</span>
+            <motion.div
+              animate={{ y: [0, 3, 0] }}
+              transition={{ duration: 1.5, repeat: Infinity }}
+            >
+              <ChevronDown className="h-4 w-4 group-hover:rotate-180 transition-transform duration-300" />
+            </motion.div>
+          </a>
+        </motion.div>
+      </motion.div>
+    </div>
   );
 }

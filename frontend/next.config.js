@@ -4,6 +4,15 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   images: { unoptimized: true },
+  transpilePackages: ['framer-motion', 'react-remove-scroll'],
+  reactStrictMode: false,
+  experimental: {
+    optimizeCss: false,
+    optimizePackageImports: [],
+    serverComponentsExternalPackages: ["framer-motion"],
+  },
+  swcMinify: false,
+  output: 'standalone',
   async rewrites() {
     return [
       {
