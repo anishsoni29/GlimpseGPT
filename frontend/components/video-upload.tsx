@@ -138,7 +138,7 @@ export function VideoUpload() {
       return;
     }
 
-    // Get the YouTube ID and convert to a standard URL format
+    // Get YouTube ID and prepare URL
     const youtubeId = getYoutubeId(url);
     if (!youtubeId) {
       toast({ title: "Could not extract valid YouTube video ID", variant: "destructive" });
@@ -150,40 +150,22 @@ export function VideoUpload() {
 
     setIsProcessing(true);
     setProgress(0);
-    setStatusMessage("Starting video processing...");
-    setStatusType("loading");
+    setStatusMessage("Processing video...");
     
-    let progressInterval: NodeJS.Timeout | undefined = undefined;
-
-    // Show processing toast
-    toast({ title: "Processing video..." });
+    // Progress animation
+    const progressInterval = setInterval(() => {
+      setProgress(prev => {
+        const newProgress = prev < 95 ? prev + (95 - prev) / 10 : prev;
+        // Update status based on progress
+        if (newProgress > 30 && prev < 30) setStatusMessage("Transcribing...");
+        else if (newProgress > 60 && prev < 60) setStatusMessage("Summarizing...");
+        else if (newProgress > 80 && prev < 80) setStatusMessage("Finalizing...");
+        return newProgress;
+      });
+    }, 300);
 
     try {
-      // Start progress animation
-      progressInterval = setInterval(() => {
-        setProgress(prev => {
-          const newProgress = prev < 95 ? prev + (95 - prev) / 10 : prev;
-          
-          // Update status message based on progress
-          if (newProgress > 10 && newProgress < 30 && prev <= 10) {
-            setStatusMessage("Downloading video...");
-            logProcessingEvent("Downloading video content...");
-          } else if (newProgress >= 30 && newProgress < 60 && prev < 30) {
-            setStatusMessage("Transcribing audio...");
-            logProcessingEvent("Transcribing audio to text...");
-          } else if (newProgress >= 60 && newProgress < 80 && prev < 60) {
-            setStatusMessage("Generating summary...");
-            logProcessingEvent("Generating summary of content...");
-          } else if (newProgress >= 80 && prev < 80) {
-            setStatusMessage("Finalizing results...");
-            logProcessingEvent("Finalizing and applying translations...");
-          }
-          
-          return newProgress;
-        });
-      }, 300);
-
-      // Add to history before processing
+      // Add to history
       addToHistory(standardUrl, youtubeId, language);
 
       // API request
@@ -191,94 +173,31 @@ export function VideoUpload() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json'
         },
         body: JSON.stringify({ url: standardUrl, language }),
       });
       
-      if (progressInterval) clearInterval(progressInterval);
-      
       if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = 'Failed to process video';
-        
-        try {
-          const errorData = JSON.parse(errorText);
-          errorMessage = errorData.detail || errorMessage;
-        } catch {
-          errorMessage = errorText || errorMessage;
-        }
-        
-        throw new Error(errorMessage);
+        throw new Error(await response.text() || "Failed to process video");
       }
 
       const data = await response.json();
-      
-      // Ensure progress completes to 100%
       setProgress(100);
-      logProcessingEvent("Response received from server successfully");
       
-      // Generate mock data in case API returns empty
-      const mockData = {
-        original_text: "This is a sample transcript for testing purposes.",
-        summary_en: "This is a sample summary in English.",
-        summary_translated: "This is a sample translated summary.",
-        language: language,
-        sentiment: { label: "Positive", score: 0.85 },
-        thumbnail_url: `https://img.youtube.com/vi/${youtubeId}/mqdefault.jpg`,
-        title: `Video: ${youtubeId}`
-      };
-      
-      // Use actual data if available, otherwise use mock
-      const finalData = (!data.summary_translated) ? mockData : data;
-      
-      // Save response data to localStorage
-      localStorage.setItem('summaryData', JSON.stringify(finalData));
-      
-      // Trigger custom storage event
-      window.dispatchEvent(new StorageEvent('storage', {
-        key: 'summaryData',
-        newValue: JSON.stringify(finalData)
-      }));
-      
-      // Dispatch a custom event for direct component communication
-      window.dispatchEvent(new CustomEvent('summaryUpdated', { detail: finalData }));
+      // Save and broadcast results
+      localStorage.setItem('summaryData', JSON.stringify(data));
+      window.dispatchEvent(new CustomEvent('summaryUpdated', { detail: data }));
       
       toast({ title: "Processing complete" });
     } catch (error) {
-      if (progressInterval) clearInterval(progressInterval);
-      setProgress(0);
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to process video",
         variant: "destructive",
       });
-      console.error("Processing error:", error);
-      
-      // Generate mock data for testing even when errors occur
-      const mockData = {
-        original_text: "This is a sample transcript for demonstration purposes.",
-        summary_en: "This is a sample summary in English.",
-        summary_translated: "This is a sample translated summary.",
-        language: language,
-        sentiment: { label: "Positive", score: 0.85 },
-        thumbnail_url: `https://img.youtube.com/vi/${youtubeId}/mqdefault.jpg`,
-        title: `Video: ${youtubeId}`
-      };
-      
-      // Save mock data to localStorage for UI testing
-      localStorage.setItem('summaryData', JSON.stringify(mockData));
-      window.dispatchEvent(new StorageEvent('storage', {
-        key: 'summaryData',
-        newValue: JSON.stringify(mockData)
-      }));
-      window.dispatchEvent(new CustomEvent('summaryUpdated', { detail: mockData }));
     } finally {
+      clearInterval(progressInterval);
       setIsProcessing(false);
-      // Reset progress after a delay if it completed successfully
-      if (progress === 100) {
-        setTimeout(() => setProgress(0), 1500);
-      }
     }
   };
 
@@ -307,43 +226,27 @@ export function VideoUpload() {
     setIsProcessing(true);
     setProgress(0);
     setStatusMessage("Processing audio file...");
-    setStatusType("loading");
-    let progressInterval: NodeJS.Timeout | undefined = undefined;
     
-    toast({ title: `Processing ${audioFile.name}...` });
-    logProcessingEvent(`Processing file: ${audioFile.name}`);
+    // Start progress animation
+    const progressInterval = setInterval(() => {
+      setProgress(prev => {
+        const newProgress = prev < 95 ? prev + (95 - prev) / 10 : prev;
+        // Update status messages at different progress points
+        if (newProgress > 30 && prev < 30) setStatusMessage("Transcribing audio...");
+        else if (newProgress > 60 && prev < 60) setStatusMessage("Generating summary...");
+        else if (newProgress > 80 && prev < 80) setStatusMessage("Finalizing...");
+        return newProgress;
+      });
+    }, 300);
     
     try {
-      // Progress animation
-      progressInterval = setInterval(() => {
-        setProgress(prev => {
-          const newProgress = prev < 95 ? prev + (95 - prev) / 10 : prev;
-          
-          // Update status message based on progress
-          if (newProgress > 10 && newProgress < 30 && prev <= 10) {
-            setStatusMessage("Processing audio...");
-            logProcessingEvent("Processing audio file...");
-          } else if (newProgress >= 30 && newProgress < 60 && prev < 30) {
-            setStatusMessage("Transcribing audio...");
-            logProcessingEvent("Transcribing audio to text...");
-          } else if (newProgress >= 60 && newProgress < 80 && prev < 60) {
-            setStatusMessage("Generating summary...");
-            logProcessingEvent("Generating summary of content...");
-          } else if (newProgress >= 80 && prev < 80) {
-            setStatusMessage("Finalizing results...");
-            logProcessingEvent("Finalizing and applying translations...");
-          }
-          
-          return newProgress;
-        });
-      }, 300);
-      
+      // Prepare form data and update history
       const language = localStorage.getItem('preferredLanguage') || 'English';
       const formData = new FormData();
       formData.append('file', audioFile);
       formData.append('language', language);
       
-      // Add to history with local file
+      // Add to history
       const fileId = uuidv4();
       updateVideoHistory({
         id: fileId,
@@ -354,97 +257,43 @@ export function VideoUpload() {
         language
       });
       
-      logProcessingEvent(`Sending file to API - size: ${(audioFile.size / (1024 * 1024)).toFixed(2)}MB`);
-      
       // API call
       const response = await fetch(`${BACKEND_URL}/api/summarize`, {
         method: 'POST',
         body: formData,
       });
       
-      if (progressInterval) clearInterval(progressInterval);
-      
-      // Check for errors in the response
       if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = 'Failed to process file';
-        
-        try {
-          const errorData = JSON.parse(errorText);
-          errorMessage = errorData.detail || errorData.error || errorMessage;
-        } catch {
-          errorMessage = errorText || errorMessage;
-        }
-        
-        throw new Error(errorMessage);
+        throw new Error(await response.text() || "Failed to process file");
       }
       
       const data = await response.json();
-      
-      // Complete progress
       setProgress(100);
-      logProcessingEvent("Response received from server successfully");
       
-      // Use actual data or fall back to mock if needed
+      // Use actual data or fallback
       const finalData = data.summary_translated ? data : {
-        original_text: "This is a sample transcript from the uploaded audio file.",
-        summary_en: "This is a sample summary in English for the uploaded file.",
-        summary_translated: "This is a sample summary of the uploaded audio in the requested language.",
-        language: language,
+        original_text: "Sample transcript from audio file",
+        summary_en: "Sample summary in English",
+        summary_translated: "Sample summary in requested language",
+        language,
         sentiment: { label: "Neutral", score: 0.6 },
-        thumbnail_url: '',
-        title: audioFile.name || 'Uploaded audio'
+        title: audioFile.name
       };
       
-      // Save response data to localStorage
+      // Save and broadcast result
       localStorage.setItem('summaryData', JSON.stringify(finalData));
-      window.dispatchEvent(new StorageEvent('storage', {
-        key: 'summaryData',
-        newValue: JSON.stringify(finalData)
-      }));
       window.dispatchEvent(new CustomEvent('summaryUpdated', { detail: finalData }));
       
       toast({ title: "Processing complete" });
     } catch (error) {
-      if (progressInterval) clearInterval(progressInterval);
-      setProgress(0);
-      
-      const errorMessage = error instanceof Error ? error.message : "Failed to process file";
-      toast({ 
-        title: "Error",
-        description: errorMessage,
+      toast({
+        title: "Error", 
+        description: error instanceof Error ? error.message : "Failed to process file",
         variant: "destructive"
       });
-      logProcessingEvent(`Error: ${errorMessage}`);
-      console.error("Processing error:", error);
-      
-      // Generate mock data for UI testing after error
-      const mockData = {
-        original_text: "This is a sample transcript from the uploaded audio file.",
-        summary_en: "This is a sample summary in English for the uploaded file.",
-        summary_translated: "This is a sample summary of the uploaded audio in the requested language.",
-        language: localStorage.getItem('preferredLanguage') || 'English',
-        sentiment: { label: "Neutral", score: 0.6 },
-        thumbnail_url: '',
-        title: audioFile.name || 'Uploaded audio'
-      };
-      
-      // Save mock data for UI testing
-      localStorage.setItem('summaryData', JSON.stringify(mockData));
-      window.dispatchEvent(new StorageEvent('storage', {
-        key: 'summaryData',
-        newValue: JSON.stringify(mockData)
-      }));
-      window.dispatchEvent(new CustomEvent('summaryUpdated', { detail: mockData }));
-      
-      // Show completion
-      setProgress(100);
     } finally {
+      clearInterval(progressInterval);
       setIsProcessing(false);
-      // Reset progress after a delay if it completed successfully
-      if (progress === 100) {
-        setTimeout(() => setProgress(0), 1500);
-      }
     }
   };
 
