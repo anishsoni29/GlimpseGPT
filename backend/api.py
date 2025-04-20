@@ -130,6 +130,7 @@ async def summarize(
                 
                 # Download audio
                 logger.info(f"Downloading audio from YouTube ID: {video_id}")
+                logger.info("Progress update: Downloading audio content")
                 try:
                     audio_file = download_audio(standard_url)
                     logger.info(f"Downloaded audio file: {audio_file}")
@@ -154,6 +155,7 @@ async def summarize(
             
             try:
                 logger.info(f"Transcribing audio from: {audio_file}")
+                logger.info("Progress update: Transcribing audio to text")
                 original_text = audio_to_text(audio_file)
                 logger.info(f"Transcribed text length: {len(original_text)} characters")
                 
@@ -223,6 +225,7 @@ async def summarize(
         
         # Generate summary in English
         logger.info("Generating summary")
+        logger.info("Progress update: Generating summary of content")
         try:
             summary_en = summarize_text(original_text)
             logger.info(f"Summary generated, length: {len(summary_en)} characters")
@@ -237,6 +240,7 @@ async def summarize(
         target_language_code = language_code_map.get(language, "en")
         if language != "English":
             logger.info(f"Translating to {language} ({target_language_code})")
+            logger.info("Progress update: Translating summary")
             try:
                 summary_translated = translate_text(summary_en, target_language_code)
                 logger.info(f"Translation complete, length: {len(summary_translated)} characters")
@@ -250,6 +254,7 @@ async def summarize(
         
         # Analyze sentiment
         logger.info("Analyzing sentiment")
+        logger.info("Progress update: Performing sentiment analysis")
         try:
             sentiment_result = sentiment_pipeline(summary_en)
             sentiment_label = sentiment_result[0]["label"]
@@ -262,6 +267,7 @@ async def summarize(
             sentiment_score = 0.5
             logger.info("Using default sentiment values")
         
+        logger.info("Progress update: Finalizing results")
         response_data = {
             "original_text": original_text,
             "summary_en": summary_en,

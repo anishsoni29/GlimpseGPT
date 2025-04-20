@@ -28,6 +28,36 @@ export function VideoUpload() {
   const [statusMessage, setStatusMessage] = useState("");
   const [statusType, setStatusType] = useState<"info" | "success" | "error" | "warning" | "loading" | "default">("default");
 
+  // Progress mapping for backend steps
+  const progressMap = {
+    "Downloading": 20,
+    "Transcribing": 40,
+    "Generating summary": 70,
+    "Translating": 85,
+    "Sentiment analysis": 90,
+    "Finalizing": 95
+  };
+
+  // Auto increment progress to avoid stagnant progress bar
+  useEffect(() => {
+    let incrementTimer: NodeJS.Timeout | null = null;
+    
+    if (isProcessing && progress < 95) {
+      // Create timer that gently increases progress to show activity
+      incrementTimer = setInterval(() => {
+        setProgress(prev => {
+          // Smaller increments as we get closer to completion
+          const increment = Math.max(0.2, (95 - prev) / 50);
+          return Math.min(prev + increment, 95);
+        });
+      }, 1000);
+    }
+    
+    return () => {
+      if (incrementTimer) clearInterval(incrementTimer);
+    };
+  }, [isProcessing, progress]);
+
   // Validate YouTube URL
   const isValidYoutubeUrl = useCallback((url: string) => {
     const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})(.*)$/;
@@ -118,6 +148,44 @@ export function VideoUpload() {
     };
   }, []);
 
+  // Listen for processing logs to update progress
+  useEffect(() => {
+    const updateProgressFromLogs = (event: CustomEvent<string>) => {
+      if (!isProcessing) return;
+      
+      const message = event.detail.toLowerCase();
+      
+      // Always increment progress slightly for any log message to show activity
+      setProgress(prev => Math.min(prev + 0.5, 95));
+      
+      // Update progress based on log message content
+      if (message.includes("download") && progress < progressMap["Downloading"]) {
+        setProgress(progressMap["Downloading"]);
+        setStatusMessage("Downloading...");
+      } else if (message.includes("transcrib") && progress < progressMap["Transcribing"]) {
+        setProgress(progressMap["Transcribing"]);
+        setStatusMessage("Transcribing...");
+      } else if (message.includes("summary") && progress < progressMap["Generating summary"]) {
+        setProgress(progressMap["Generating summary"]);
+        setStatusMessage("Generating summary...");
+      } else if (message.includes("translat") && progress < progressMap["Translating"]) {
+        setProgress(progressMap["Translating"]);
+        setStatusMessage("Translating...");
+      } else if (message.includes("sentiment") && progress < progressMap["Sentiment analysis"]) {
+        setProgress(progressMap["Sentiment analysis"]);
+        setStatusMessage("Analyzing sentiment...");
+      } else if (message.includes("finaliz") && progress < progressMap["Finalizing"]) {
+        setProgress(progressMap["Finalizing"]);
+        setStatusMessage("Finalizing...");
+      }
+    };
+    
+    window.addEventListener('processingLog', updateProgressFromLogs as EventListener);
+    return () => {
+      window.removeEventListener('processingLog', updateProgressFromLogs as EventListener);
+    };
+  }, [isProcessing, progress]);
+
   const logProcessingEvent = (message: string) => {
     console.log(`Processing: ${message}`);
     // Emit a custom event for the processing logs component
@@ -149,20 +217,9 @@ export function VideoUpload() {
     const language = localStorage.getItem('preferredLanguage') || 'English';
 
     setIsProcessing(true);
-    setProgress(0);
-    setStatusMessage("Processing video...");
-    
-    // Progress animation
-    const progressInterval = setInterval(() => {
-      setProgress(prev => {
-        const newProgress = prev < 95 ? prev + (95 - prev) / 10 : prev;
-        // Update status based on progress
-        if (newProgress > 30 && prev < 30) setStatusMessage("Transcribing...");
-        else if (newProgress > 60 && prev < 60) setStatusMessage("Summarizing...");
-        else if (newProgress > 80 && prev < 80) setStatusMessage("Finalizing...");
-        return newProgress;
-      });
-    }, 300);
+    setProgress(5);  // Initial progress
+    setStatusMessage("Starting processing...");
+    logProcessingEvent("Starting video processing...");
 
     try {
       // Add to history
@@ -174,7 +231,7 @@ export function VideoUpload() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url: standardUrl, language }),
+        body: JSON.stringify({ url: standardUrl, language, include_timestamps: true }),
       });
       
       if (!response.ok) {
@@ -182,7 +239,45 @@ export function VideoUpload() {
       }
 
       const data = await response.json();
+      
+      // Transform raw transcript into segments with timestamps if they don't exist
+      if (data.original_text && !data.transcript_segments) {
+        const approximateSegmentLength = 120; // characters
+        const text = data.original_text;
+        const textLength = text.length;
+        const segments = [];
+        let segmentCount = Math.ceil(textLength / approximateSegmentLength);
+        
+        // Create roughly equal segments with approximated timestamps
+        for (let i = 0; i < segmentCount; i++) {
+          const start = Math.floor((i / segmentCount) * 600); // Assuming 10 minutes total for calculation
+          const end = Math.floor(((i + 1) / segmentCount) * 600);
+          const startIdx = Math.floor((i / segmentCount) * textLength);
+          const endIdx = i === segmentCount - 1 
+            ? textLength 
+            : Math.floor(((i + 1) / segmentCount) * textLength);
+            
+          // Find sentence boundary if possible
+          let segmentEndIdx = endIdx;
+          if (i < segmentCount - 1) {
+            const nextPeriod = text.indexOf('. ', startIdx, endIdx + 20);
+            if (nextPeriod > startIdx && nextPeriod < endIdx + 20) {
+              segmentEndIdx = nextPeriod + 1;
+            }
+          }
+          
+          segments.push({
+            text: text.substring(startIdx, segmentEndIdx).trim(),
+            start,
+            end
+          });
+        }
+        
+        data.transcript_segments = segments;
+      }
+      
       setProgress(100);
+      logProcessingEvent("Processing complete!");
       
       // Save and broadcast results
       localStorage.setItem('summaryData', JSON.stringify(data));
@@ -190,13 +285,13 @@ export function VideoUpload() {
       
       toast({ title: "Processing complete" });
     } catch (error) {
+      logProcessingEvent(`Error: ${error instanceof Error ? error.message : "Failed to process video"}`);
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to process video",
         variant: "destructive",
       });
     } finally {
-      clearInterval(progressInterval);
       setIsProcessing(false);
     }
   };
@@ -224,20 +319,9 @@ export function VideoUpload() {
     }
     
     setIsProcessing(true);
-    setProgress(0);
-    setStatusMessage("Processing audio file...");
-    
-    // Start progress animation
-    const progressInterval = setInterval(() => {
-      setProgress(prev => {
-        const newProgress = prev < 95 ? prev + (95 - prev) / 10 : prev;
-        // Update status messages at different progress points
-        if (newProgress > 30 && prev < 30) setStatusMessage("Transcribing audio...");
-        else if (newProgress > 60 && prev < 60) setStatusMessage("Generating summary...");
-        else if (newProgress > 80 && prev < 80) setStatusMessage("Finalizing...");
-        return newProgress;
-      });
-    }, 300);
+    setProgress(5);  // Initial progress
+    setStatusMessage("Starting processing...");
+    logProcessingEvent(`Processing file: ${audioFile.name}`);
     
     try {
       // Prepare form data and update history
@@ -245,6 +329,7 @@ export function VideoUpload() {
       const formData = new FormData();
       formData.append('file', audioFile);
       formData.append('language', language);
+      formData.append('include_timestamps', 'true');
       
       // Add to history
       const fileId = uuidv4();
@@ -268,31 +353,59 @@ export function VideoUpload() {
       }
       
       const data = await response.json();
-      setProgress(100);
       
-      // Use actual data or fallback
-      const finalData = data.summary_translated ? data : {
-        original_text: "Sample transcript from audio file",
-        summary_en: "Sample summary in English",
-        summary_translated: "Sample summary in requested language",
-        language,
-        sentiment: { label: "Neutral", score: 0.6 },
-        title: audioFile.name
-      };
+      // Transform raw transcript into segments with timestamps if they don't exist
+      if (data.original_text && !data.transcript_segments) {
+        const approximateSegmentLength = 120; // characters
+        const text = data.original_text;
+        const textLength = text.length;
+        const segments = [];
+        let segmentCount = Math.ceil(textLength / approximateSegmentLength);
+        
+        // Create roughly equal segments with approximated timestamps
+        for (let i = 0; i < segmentCount; i++) {
+          const start = Math.floor((i / segmentCount) * 600); // Assuming 10 minutes total for calculation
+          const end = Math.floor(((i + 1) / segmentCount) * 600);
+          const startIdx = Math.floor((i / segmentCount) * textLength);
+          const endIdx = i === segmentCount - 1 
+            ? textLength 
+            : Math.floor(((i + 1) / segmentCount) * textLength);
+            
+          // Find sentence boundary if possible
+          let segmentEndIdx = endIdx;
+          if (i < segmentCount - 1) {
+            const nextPeriod = text.indexOf('. ', startIdx, endIdx + 20);
+            if (nextPeriod > startIdx && nextPeriod < endIdx + 20) {
+              segmentEndIdx = nextPeriod + 1;
+            }
+          }
+          
+          segments.push({
+            text: text.substring(startIdx, segmentEndIdx).trim(),
+            start,
+            end
+          });
+        }
+        
+        data.transcript_segments = segments;
+      }
+      
+      setProgress(100);
+      logProcessingEvent("Processing complete!");
       
       // Save and broadcast result
-      localStorage.setItem('summaryData', JSON.stringify(finalData));
-      window.dispatchEvent(new CustomEvent('summaryUpdated', { detail: finalData }));
+      localStorage.setItem('summaryData', JSON.stringify(data));
+      window.dispatchEvent(new CustomEvent('summaryUpdated', { detail: data }));
       
       toast({ title: "Processing complete" });
     } catch (error) {
+      logProcessingEvent(`Error: ${error instanceof Error ? error.message : "Failed to process file"}`);
       toast({
         title: "Error", 
         description: error instanceof Error ? error.message : "Failed to process file",
         variant: "destructive"
       });
     } finally {
-      clearInterval(progressInterval);
       setIsProcessing(false);
     }
   };
@@ -353,10 +466,15 @@ export function VideoUpload() {
       {isProcessing && (
         <div className="mt-4 space-y-2">
           <div className="flex items-center justify-between text-xs">
-            <span>{statusMessage}</span>
+            <span className="animate-pulse">{statusMessage}</span>
             <span>{Math.round(progress)}%</span>
           </div>
-          <Progress value={progress} className="h-1.5" />
+          <Progress 
+            value={progress} 
+            className="h-1.5 transition-all duration-300 ease-in-out overflow-hidden relative"
+          >
+            <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-purple-600 opacity-20 animate-pulse"></div>
+          </Progress>
         </div>
       )}
     </Card>
