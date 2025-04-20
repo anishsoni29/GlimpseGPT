@@ -18,7 +18,8 @@ import {
   Volume,
   VolumeX,
   SkipForward,
-  SkipBack
+  SkipBack,
+  Expand
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
@@ -39,6 +40,11 @@ interface SummaryData {
   };
   thumbnail_url?: string;
   title?: string;
+  transcript_segments?: {
+    text: string;
+    start: number;
+    end: number;
+  }[];
 }
 
 export function SummaryDisplay() {
@@ -54,6 +60,8 @@ export function SummaryDisplay() {
   const [duration, setDuration] = useState(0);
   const [showAudioPlayer, setShowAudioPlayer] = useState(false);
   const [currentUtterance, setCurrentUtterance] = useState<SpeechSynthesisUtterance | null>(null);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const fullScreenRef = useRef<HTMLDivElement>(null);
   
   const { toast } = useToast();
   
@@ -364,6 +372,30 @@ export function SummaryDisplay() {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
+  // Format timestamp for transcript segments
+  const formatTimestamp = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+  
+  // Toggle fullscreen for transcript
+  const toggleFullScreen = useCallback(() => {
+    setIsFullScreen(!isFullScreen);
+  }, [isFullScreen]);
+
+  // Exit fullscreen when ESC key is pressed
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullScreen) {
+        setIsFullScreen(false);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullScreen]);
+
   if (!summaryData) {
     return (
       <Card className="p-8 flex flex-col items-center justify-center border">
@@ -387,6 +419,110 @@ export function SummaryDisplay() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
     >
+      <AnimatePresence>
+        {isFullScreen && (
+          <motion.div
+            ref={fullScreenRef}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
+              transition={{ type: "spring", stiffness: 300 }}
+              className="w-full max-w-4xl p-8 mx-4 rounded-lg shadow-2xl bg-card border"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <motion.h2 
+                  initial={{ x: -20, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: 0.1 }}
+                  className="text-2xl font-bold flex items-center"
+                >
+                  <FileAudio className="h-6 w-6 mr-2 text-primary" />
+                  Full Transcript
+                </motion.h2>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={toggleFullScreen}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <motion.span
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                  >
+                    ESC to close ×
+                  </motion.span>
+                </Button>
+              </div>
+              
+              <ScrollArea className="h-[70vh] pr-4">
+                {summaryData.transcript_segments ? (
+                  <div className="space-y-4">
+                    {summaryData.transcript_segments.map((segment, idx) => (
+                      <motion.div 
+                        key={idx}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.01, duration: 0.3 }}
+                        className="group flex p-3 rounded-lg hover:bg-muted transition-colors"
+                      >
+                        <div className="w-16 flex-shrink-0 text-sm font-mono text-muted-foreground">
+                          {formatTimestamp(segment.start)}
+                        </div>
+                        <div className="flex-grow">{segment.text}</div>
+                      </motion.div>
+                    ))}
+                  </div>
+                ) : summaryData.original_text ? (
+                  <div className="whitespace-pre-wrap leading-relaxed">
+                    {summaryData.original_text}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground italic">No transcript available.</p>
+                )}
+              </ScrollArea>
+              
+              <div className="mt-6 flex justify-between">
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={toggleTranscriptAudio}
+                  className="transition-all duration-200 hover:bg-primary/10"
+                >
+                  {isTranscriptPlaying ? (
+                    <>
+                      <Pause className="h-4 w-4 mr-2" />
+                      Pause Audio
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-4 w-4 mr-2" />
+                      Play Audio
+                    </>
+                  )}
+                </Button>
+                
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={() => copyToClipboard(summaryData.original_text || "")}
+                  className="transition-all duration-200 hover:bg-primary/10"
+                >
+                  <Copy className="h-4 w-4 mr-2" />
+                  Copy Transcript
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
       <Card className="overflow-hidden border shadow-md">
         <motion.div 
           className="p-4 flex items-center justify-between border-b bg-muted/30"
@@ -473,7 +609,7 @@ export function SummaryDisplay() {
                 transition={{ duration: 0.2 }}
               >
                 <TabsContent value="summary" className="mt-0 space-y-4">
-                  <ScrollArea className="h-64 border rounded-md p-4 bg-card/50">
+                  <ScrollArea className="h-52 border rounded-md p-4 bg-card/50">
                     {summaryData.summary_translated ? (
                       <p className="leading-relaxed">{summaryData.summary_translated}</p>
                     ) : (
@@ -526,84 +662,194 @@ export function SummaryDisplay() {
                   
                   {summaryData.sentiment && (
                     <motion.div 
-                      initial={{ opacity: 0, y: 30, scale: 0.9 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      initial={{ opacity: 0, y: 30 }}
+                      animate={{ opacity: 1, y: 0 }}
                       transition={{ 
                         type: "spring", 
                         stiffness: 300, 
                         damping: 20,
                         delay: 0.3
                       }}
-                      className={`p-4 rounded-md border shadow-sm
-                        ${summaryData.sentiment.label.toLowerCase() === 'positive' 
-                          ? 'bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-900/30' 
-                          : summaryData.sentiment.label.toLowerCase() === 'negative'
-                            ? 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900/30'
-                            : 'bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/30'
-                        }`}
+                      className="overflow-hidden rounded-lg border shadow-sm bg-black/5 dark:bg-white/5"
                     >
-                      <motion.div 
-                        className="flex justify-between mb-2"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ delay: 0.5 }}
-                      >
-                        <div className="flex items-center">
-                          <motion.div
-                            initial={{ rotate: -30, opacity: 0 }}
-                            animate={{ rotate: 0, opacity: 1 }}
-                            transition={{ 
-                              type: "spring", 
-                              stiffness: 300, 
-                              delay: 0.6
-                            }}
-                          >
-                            <Activity className="h-4 w-4 mr-2" />
-                          </motion.div>
-                          <motion.span 
-                            initial={{ x: -10, opacity: 0 }}
-                            animate={{ x: 0, opacity: 1 }}
-                            transition={{ delay: 0.7 }}
-                            className="font-medium"
-                          >
-                            {summaryData.sentiment.label} Sentiment
-                          </motion.span>
-                        </div>
-                        <motion.span 
-                          initial={{ scale: 0.8, opacity: 0 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          transition={{ delay: 0.8 }}
-                          className="font-medium"
-                        >
-                          {Math.round(summaryData.sentiment.score * 100)}%
-                      </motion.span>
-                      </motion.div>
-                      <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded overflow-hidden">
-                        <motion.div 
-                          initial={{ width: 0 }}
-                          animate={{ width: `${Math.round(summaryData.sentiment.score * 100)}%` }}
-                          transition={{ 
-                            delay: 0.9, 
-                            duration: 1,
-                            type: "spring",
-                            stiffness: 50
-                          }}
-                          className={`h-full ${
-                            summaryData.sentiment.label.toLowerCase() === 'positive' 
-                              ? 'bg-green-500' 
-                              : summaryData.sentiment.label.toLowerCase() === 'negative'
-                                ? 'bg-red-500'
-                                : 'bg-blue-500'
+                      <div className="relative">
+                        {/* Background gradient based on sentiment */}
+                        <div 
+                          className={`absolute inset-0 opacity-10 ${
+                            summaryData.sentiment.label.toLowerCase().includes('label_1') || 
+                            summaryData.sentiment.label.toLowerCase().includes('positive')
+                              ? 'bg-gradient-to-r from-green-300 to-emerald-500' 
+                              : summaryData.sentiment.label.toLowerCase().includes('label_0') ||
+                                summaryData.sentiment.label.toLowerCase().includes('negative')
+                                ? 'bg-gradient-to-r from-red-300 to-red-500'
+                                : 'bg-gradient-to-r from-blue-300 to-indigo-500'
                           }`}
                         />
+                        
+                        {/* Sentiment header */}
+                        <div className="relative p-4 flex items-center justify-between border-b">
+                          <motion.div 
+                            className="flex items-center space-x-2"
+                            initial={{ x: -20, opacity: 0 }}
+                            animate={{ x: 0, opacity: 1 }}
+                            transition={{ delay: 0.4, type: "spring" }}
+                          >
+                            <motion.div
+                              initial={{ scale: 0 }}
+                              animate={{ scale: 1 }}
+                              transition={{ 
+                                type: "spring", 
+                                stiffness: 300,
+                                delay: 0.5
+                              }}
+                              className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                                summaryData.sentiment.label.toLowerCase().includes('label_1') || 
+                                summaryData.sentiment.label.toLowerCase().includes('positive')
+                                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
+                                  : summaryData.sentiment.label.toLowerCase().includes('label_0') ||
+                                    summaryData.sentiment.label.toLowerCase().includes('negative')
+                                    ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                              }`}
+                            >
+                              <Activity className="h-4 w-4" />
+                            </motion.div>
+                            <div>
+                              <motion.div 
+                                className="text-sm font-medium"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ delay: 0.6 }}
+                              >
+                                Sentiment Analysis
+                              </motion.div>
+                              <motion.div 
+                                className="text-xs text-muted-foreground"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ delay: 0.7 }}
+                              >
+                                {summaryData.sentiment.label.toLowerCase().includes('label_1') ? 'Positive' : 
+                                 summaryData.sentiment.label.toLowerCase().includes('label_0') ? 'Negative' : 
+                                 summaryData.sentiment.label}
+                              </motion.div>
+                            </div>
+                          </motion.div>
+                          
+                          <motion.div 
+                            initial={{ scale: 0.5, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            transition={{ 
+                              type: "spring",
+                              stiffness: 300,
+                              delay: 0.6 
+                            }}
+                            className="text-2xl font-bold"
+                          >
+                            {Math.round(summaryData.sentiment.score * 100)}%
+                          </motion.div>
+                        </div>
+                        
+                        {/* Sentiment meter */}
+                        <div className="p-4 pt-3">
+                          <div className="h-6 bg-black/5 dark:bg-white/5 rounded-full overflow-hidden relative">
+                            {/* Animated dots in background for visual flair */}
+                            <motion.div
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 0.5 }}
+                              transition={{ delay: 0.7, duration: 1 }}
+                              className="absolute inset-0 flex justify-between px-1"
+                            >
+                              {[...Array(20)].map((_, i) => (
+                                <motion.div 
+                                  key={i}
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: i / 20 }}
+                                  transition={{ delay: 0.7 + (i * 0.02) }}
+                                  className="w-1 h-1 rounded-full bg-white/30 dark:bg-black/30 my-2.5"
+                                />
+                              ))}
+                            </motion.div>
+                            
+                            {/* Actual progress bar with animated fill */}
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.round(summaryData.sentiment.score * 100)}%` }}
+                              transition={{ 
+                                delay: 0.8, 
+                                duration: 1.5,
+                                type: "spring",
+                                stiffness: 50,
+                                damping: 15
+                              }}
+                              className={`h-full relative ${
+                                summaryData.sentiment.label.toLowerCase().includes('label_1') || 
+                                summaryData.sentiment.label.toLowerCase().includes('positive')
+                                  ? 'bg-gradient-to-r from-green-400 to-emerald-600' 
+                                  : summaryData.sentiment.label.toLowerCase().includes('label_0') ||
+                                    summaryData.sentiment.label.toLowerCase().includes('negative')
+                                    ? 'bg-gradient-to-r from-red-400 to-red-600'
+                                    : 'bg-gradient-to-r from-blue-400 to-indigo-600'
+                              }`}
+                            >
+                              {/* Animated pulse effect */}
+                              <motion.div 
+                                animate={{ 
+                                  opacity: [0.2, 0.5, 0.2],
+                                  scale: [1, 1.05, 1]
+                                }}
+                                transition={{ 
+                                  duration: 2,
+                                  repeat: Infinity,
+                                  repeatType: "reverse" 
+                                }}
+                                className="absolute right-0 top-0 bottom-0 w-4 rounded-r-full bg-white/30"
+                              />
+                            </motion.div>
+                            
+                            {/* Percentage markers */}
+                            <div className="absolute inset-0 flex justify-between px-3 items-center pointer-events-none">
+                              {[0, 25, 50, 75, 100].map((mark) => (
+                                <motion.div 
+                                  key={mark}
+                                  initial={{ opacity: 0, y: 5 }}
+                                  animate={{ opacity: 0.7, y: 0 }}
+                                  transition={{ delay: 0.9 + (mark / 100) }}
+                                  className="text-[10px] text-white dark:text-gray-300 mix-blend-difference"
+                                >
+                                  {summaryData.sentiment && mark === Math.round(summaryData.sentiment.score * 100) && (
+                                    <motion.div 
+                                      className="absolute -mt-5 -ml-2.5 font-bold"
+                                      animate={{ y: [0, -3, 0] }}
+                                      transition={{ duration: 1.5, repeat: Infinity, repeatType: "reverse" }}
+                                    >
+                                      ▼
+                                    </motion.div>
+                                  )}
+                                </motion.div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </motion.div>
                   )}
                 </TabsContent>
                 
                 <TabsContent value="transcript" className="mt-0 space-y-4">
-                  <ScrollArea className="h-64 border rounded-md p-4 bg-card/50">
-                    {summaryData.original_text ? (
+                  <ScrollArea className="h-52 border rounded-md p-4 bg-card/50">
+                    {summaryData.transcript_segments ? (
+                      <div className="space-y-2">
+                        {summaryData.transcript_segments.map((segment, idx) => (
+                          <div key={idx} className="flex text-sm hover:bg-muted/40 p-1 rounded">
+                            <div className="w-12 flex-shrink-0 font-mono text-muted-foreground">
+                              {formatTimestamp(segment.start)}
+                            </div>
+                            <div className="flex-grow">{segment.text}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : summaryData.original_text ? (
                       <p className="leading-relaxed">{summaryData.original_text}</p>
                     ) : (
                       <p className="text-muted-foreground italic">No transcript available.</p>
@@ -611,34 +857,46 @@ export function SummaryDisplay() {
                   </ScrollArea>
                   
                   <div className="flex justify-between">
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        onClick={toggleTranscriptAudio}
+                        className="transition-all duration-200 hover:bg-primary/10"
+                      >
+                        {isTranscriptPlaying ? (
+                          <>
+                            <Pause className="h-4 w-4 mr-2" />
+                            Pause
+                          </>
+                        ) : (
+                          <>
+                            <Play className="h-4 w-4 mr-2" />
+                            Listen
+                          </>
+                        )}
+                      </Button>
+                      
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        onClick={toggleFullScreen}
+                        className="transition-all duration-200 hover:bg-primary/10"
+                      >
+                        <Expand className="h-4 w-4 mr-2" />
+                        Full Screen
+                      </Button>
+                    </div>
+                    
                     <Button 
                       size="sm" 
                       variant="outline" 
-                      onClick={toggleTranscriptAudio}
-                      className="transition-all duration-200 hover:bg-primary/10"
-                    >
-                      {isTranscriptPlaying ? (
-                        <>
-                          <Pause className="h-4 w-4 mr-2" />
-                          Pause Audio
-                        </>
-                      ) : (
-                        <>
-                          <Play className="h-4 w-4 mr-2" />
-                          Play Audio
-                        </>
-                      )}
-                </Button>
-                    
-                <Button 
-                      size="sm" 
-                  variant="outline" 
                       onClick={() => copyToClipboard(summaryData.original_text || "")}
                       className="transition-all duration-200 hover:bg-primary/10"
-                >
+                    >
                       <Copy className="h-4 w-4 mr-2" />
-                      Copy Transcript
-                </Button>
+                      Copy
+                    </Button>
                   </div>
                 </TabsContent>
               </motion.div>
