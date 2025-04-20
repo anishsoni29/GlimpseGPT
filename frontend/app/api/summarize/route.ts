@@ -4,11 +4,53 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
 
 export async function POST(req: Request) {
   try {
-    const { url, file, language = 'English' } = await req.json();
-
-    if (!url && !file) {
+    // Check content type
+    const contentType = req.headers.get('content-type') || '';
+    
+    let backendRequestBody: any = null;
+    
+    // Handle different content types
+    if (contentType.includes('application/json')) {
+      // Parse JSON request
+      const requestBody = await req.json();
+      const { url, file, language = 'English' } = requestBody;
+      
+      if (!url && !file) {
+        return NextResponse.json(
+          { error: 'Video URL or file is required' },
+          { status: 400 }
+        );
+      }
+      
+      // Prepare backend request body
+      backendRequestBody = { 
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      };
+    } else if (contentType.includes('multipart/form-data') || contentType.includes('boundary=')) {
+      // Handle FormData (file upload)
+      try {
+        const formData = await req.formData();
+        
+        // Forward the form data directly
+        backendRequestBody = {
+          method: 'POST',
+          // Don't set Content-Type as fetch will set it with the boundary
+          body: formData
+        };
+      } catch (error) {
+        console.error('Error parsing form data:', error);
+        return NextResponse.json(
+          { error: 'Failed to parse form data' },
+          { status: 400 }
+        );
+      }
+    } else {
       return NextResponse.json(
-        { error: 'Video URL or file is required' },
+        { error: `Unsupported content type: ${contentType}` },
         { status: 400 }
       );
     }
@@ -16,28 +58,31 @@ export async function POST(req: Request) {
     // Forward the request to the backend API
     const apiEndpoint = `${BACKEND_URL}/api/summarize`;
     
-    // Set up request body
-    const requestBody: any = {};
-    if (url) requestBody.url = url;
-    if (file) requestBody.file = file;
-    requestBody.language = language;
+    try {
+      const backendResponse = await fetch(apiEndpoint, backendRequestBody);
 
-    const backendResponse = await fetch(apiEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
+      if (!backendResponse.ok) {
+        const errorText = await backendResponse.text();
+        let errorData;
+        
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { detail: errorText || 'Failed to process request' };
+        }
+        
+        throw new Error(errorData.detail || 'Failed to process video');
+      }
 
-    if (!backendResponse.ok) {
-      const errorData = await backendResponse.json();
-      throw new Error(errorData.detail || 'Failed to process video');
+      const responseData = await backendResponse.json();
+      return NextResponse.json(responseData);
+    } catch (fetchError) {
+      console.error('Fetch error:', fetchError);
+      return NextResponse.json(
+        { error: fetchError instanceof Error ? fetchError.message : 'Failed to connect to backend service' },
+        { status: 502 }
+      );
     }
-
-    const responseData = await backendResponse.json();
-    return NextResponse.json(responseData);
-    
   } catch (error) {
     console.error('Processing error:', error);
     return NextResponse.json(

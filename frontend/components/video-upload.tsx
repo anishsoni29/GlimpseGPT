@@ -306,14 +306,36 @@ export function VideoUpload() {
     
     setIsProcessing(true);
     setProgress(0);
+    setStatusMessage("Processing audio file...");
+    setStatusType("loading");
     let progressInterval: NodeJS.Timeout | undefined = undefined;
     
     toast({ title: `Processing ${audioFile.name}...` });
+    logProcessingEvent(`Processing file: ${audioFile.name}`);
     
     try {
       // Progress animation
       progressInterval = setInterval(() => {
-        setProgress(prev => prev < 95 ? prev + (95 - prev) / 10 : prev);
+        setProgress(prev => {
+          const newProgress = prev < 95 ? prev + (95 - prev) / 10 : prev;
+          
+          // Update status message based on progress
+          if (newProgress > 10 && newProgress < 30 && prev <= 10) {
+            setStatusMessage("Processing audio...");
+            logProcessingEvent("Processing audio file...");
+          } else if (newProgress >= 30 && newProgress < 60 && prev < 30) {
+            setStatusMessage("Transcribing audio...");
+            logProcessingEvent("Transcribing audio to text...");
+          } else if (newProgress >= 60 && newProgress < 80 && prev < 60) {
+            setStatusMessage("Generating summary...");
+            logProcessingEvent("Generating summary of content...");
+          } else if (newProgress >= 80 && prev < 80) {
+            setStatusMessage("Finalizing results...");
+            logProcessingEvent("Finalizing and applying translations...");
+          }
+          
+          return newProgress;
+        });
       }, 300);
       
       const language = localStorage.getItem('preferredLanguage') || 'English';
@@ -332,31 +354,39 @@ export function VideoUpload() {
         language
       });
       
-      // Try API call, handle failures with mock data
-      let response;
-      try {
-        response = await fetch(`${BACKEND_URL}/api/summarize`, {
-          method: 'POST',
-          body: formData,
-        });
-      } catch (error) {
-        throw new Error("API server is not responding. Using demo mode.");
-      }
+      logProcessingEvent(`Sending file to API - size: ${(audioFile.size / (1024 * 1024)).toFixed(2)}MB`);
+      
+      // API call
+      const response = await fetch(`${BACKEND_URL}/api/summarize`, {
+        method: 'POST',
+        body: formData,
+      });
       
       if (progressInterval) clearInterval(progressInterval);
       
-      let data;
-      if (response && response.ok) {
-        data = await response.json();
-      } else {
-        throw new Error("Error processing file. Using demo mode.");
+      // Check for errors in the response
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = 'Failed to process file';
+        
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.detail || errorData.error || errorMessage;
+        } catch {
+          errorMessage = errorText || errorMessage;
+        }
+        
+        throw new Error(errorMessage);
       }
+      
+      const data = await response.json();
       
       // Complete progress
       setProgress(100);
+      logProcessingEvent("Response received from server successfully");
       
-      // Generate mock data for demonstration
-      const mockData = {
+      // Use actual data or fall back to mock if needed
+      const finalData = data.summary_translated ? data : {
         original_text: "This is a sample transcript from the uploaded audio file.",
         summary_en: "This is a sample summary in English for the uploaded file.",
         summary_translated: "This is a sample summary of the uploaded audio in the requested language.",
@@ -365,9 +395,6 @@ export function VideoUpload() {
         thumbnail_url: '',
         title: audioFile.name || 'Uploaded audio'
       };
-      
-      // Use actual data if available, otherwise use mock
-      const finalData = (!data || !data.summary_translated) ? mockData : data;
       
       // Save response data to localStorage
       localStorage.setItem('summaryData', JSON.stringify(finalData));
@@ -382,9 +409,16 @@ export function VideoUpload() {
       if (progressInterval) clearInterval(progressInterval);
       setProgress(0);
       
-      toast({ title: "Using demo mode" });
+      const errorMessage = error instanceof Error ? error.message : "Failed to process file";
+      toast({ 
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive"
+      });
+      logProcessingEvent(`Error: ${errorMessage}`);
+      console.error("Processing error:", error);
       
-      // Generate mock data
+      // Generate mock data for UI testing after error
       const mockData = {
         original_text: "This is a sample transcript from the uploaded audio file.",
         summary_en: "This is a sample summary in English for the uploaded file.",

@@ -28,20 +28,30 @@ sentiment_pipeline = pipeline("sentiment-analysis", model="cardiffnlp/twitter-ro
 # Function to download YouTube audio
 def download_audio(url, output_path="audio"):
     try:
+        # Ensure output directory exists
+        output_path = os.path.abspath(output_path)
+        os.makedirs(output_path, exist_ok=True)
+        
+        # Clean filename template to avoid problematic characters
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(output_path, '%(id)s.%(ext)s'),  # Use video ID instead of title
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
             }],
             'postprocessor_args': ['-ar', '16000'],
         }
-        if not os.path.exists(output_path):
-            os.makedirs(output_path)
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(url, download=True)
-            audio_file = os.path.join(output_path, f"{info_dict['title']}.mp3")
+            video_id = info_dict.get('id') or 'audio'
+            audio_file = os.path.join(output_path, f"{video_id}.mp3")
+            
+            # Verify file exists
+            if not os.path.exists(audio_file):
+                raise Exception(f"Downloaded file not found at {audio_file}")
+                
             return audio_file
     except Exception as e:
         raise Exception(f"Failed to download audio: {str(e)}")
@@ -49,6 +59,10 @@ def download_audio(url, output_path="audio"):
 # Function to convert audio to text
 def audio_to_text(audio_file, chunk_duration=20):
     try:
+        # First check if file exists
+        if not os.path.exists(audio_file):
+            raise Exception(f"Audio file not found: {audio_file}")
+            
         recognizer = sr.Recognizer()
         # Convert MP3 to WAV if necessary
         if audio_file.lower().endswith('.mp3'):
@@ -64,8 +78,12 @@ def audio_to_text(audio_file, chunk_duration=20):
         audio_chunks = [audio[i * 1000 * chunk_duration:(i + 1) * 1000 * chunk_duration]
                         for i in range(len(audio) // (1000 * chunk_duration))]
 
+        # Create directory for temporary chunks if needed
+        temp_dir = "temp_audio_chunks"
+        os.makedirs(temp_dir, exist_ok=True)
+
         def transcribe_chunk(chunk, index):
-            temp_chunk = f"chunk{index}.wav"
+            temp_chunk = os.path.join(temp_dir, f"chunk{index}.wav")
             chunk.export(temp_chunk, format="wav")
             with sr.AudioFile(temp_chunk) as source:
                 audio_data = recognizer.record(source)
@@ -83,9 +101,14 @@ def audio_to_text(audio_file, chunk_duration=20):
                             os.remove(temp_chunk)
                         except:
                             pass
-
-        with ThreadPoolExecutor() as executor:
-            transcripts = list(executor.map(transcribe_chunk, audio_chunks, range(len(audio_chunks))))
+        
+        # Only process chunks if we have any
+        if len(audio_chunks) > 0:
+            with ThreadPoolExecutor() as executor:
+                transcripts = list(executor.map(transcribe_chunk, audio_chunks, range(len(audio_chunks))))
+        else:
+            # If audio is too short, process it directly
+            transcripts = [transcribe_chunk(audio, 0)]
 
         # Cleanup temporary file if created from an MP3.
         if audio_file.lower().endswith('.mp3'):
