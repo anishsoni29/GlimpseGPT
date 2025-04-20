@@ -28,20 +28,23 @@ sentiment_pipeline = pipeline("sentiment-analysis", model="cardiffnlp/twitter-ro
 # Function to download YouTube audio
 def download_audio(url, output_path="audio"):
     try:
+        # Ensure output directory exists
+        os.makedirs(os.path.abspath(output_path), exist_ok=True)
+        
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(output_path, '%(id)s.%(ext)s'),
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
             }],
             'postprocessor_args': ['-ar', '16000'],
         }
-        if not os.path.exists(output_path):
-            os.makedirs(output_path)
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(url, download=True)
-            audio_file = os.path.join(output_path, f"{info_dict['title']}.mp3")
+            video_id = info_dict.get('id', 'audio')
+            audio_file = os.path.join(output_path, f"{video_id}.mp3")
             return audio_file
     except Exception as e:
         raise Exception(f"Failed to download audio: {str(e)}")
@@ -49,7 +52,16 @@ def download_audio(url, output_path="audio"):
 # Function to convert audio to text
 def audio_to_text(audio_file, chunk_duration=20):
     try:
+        # Check if file exists
+        if not os.path.exists(audio_file):
+            raise Exception(f"Audio file not found: {audio_file}")
+            
+        # Create temp dir
+        temp_dir = "temp_audio_chunks"
+        os.makedirs(temp_dir, exist_ok=True)
+            
         recognizer = sr.Recognizer()
+        
         # Convert MP3 to WAV if necessary
         if audio_file.lower().endswith('.mp3'):
             audio = AudioSegment.from_mp3(audio_file)
@@ -58,44 +70,44 @@ def audio_to_text(audio_file, chunk_duration=20):
         else:
             wav_file = audio_file
 
-        # Ensure audio is in the correct sample rate (16kHz)
+        # Process audio
         audio = AudioSegment.from_wav(wav_file).set_frame_rate(16000)
-        # Split audio into smaller chunks
         audio_chunks = [audio[i * 1000 * chunk_duration:(i + 1) * 1000 * chunk_duration]
                         for i in range(len(audio) // (1000 * chunk_duration))]
-
+        
         def transcribe_chunk(chunk, index):
-            temp_chunk = f"chunk{index}.wav"
+            temp_chunk = os.path.join(temp_dir, f"chunk{index}.wav")
             chunk.export(temp_chunk, format="wav")
             with sr.AudioFile(temp_chunk) as source:
                 audio_data = recognizer.record(source)
                 try:
-                    transcript = recognizer.recognize_google(audio_data, language="en-US", show_all=False)
-                    return transcript
+                    return recognizer.recognize_google(audio_data, language="en-US", show_all=False)
                 except sr.UnknownValueError:
                     return ""
                 except sr.RequestError as e:
                     return f"API Request Error: {e}"
                 finally:
-                    # Clean up temporary chunk file
                     if os.path.exists(temp_chunk):
                         try:
                             os.remove(temp_chunk)
                         except:
                             pass
 
-        with ThreadPoolExecutor() as executor:
-            transcripts = list(executor.map(transcribe_chunk, audio_chunks, range(len(audio_chunks))))
+        # Process chunks
+        if len(audio_chunks) > 0:
+            with ThreadPoolExecutor() as executor:
+                transcripts = list(executor.map(transcribe_chunk, audio_chunks, range(len(audio_chunks))))
+        else:
+            transcripts = [transcribe_chunk(audio, 0)]
 
-        # Cleanup temporary file if created from an MP3.
-        if audio_file.lower().endswith('.mp3'):
+        # Cleanup
+        if audio_file.lower().endswith('.mp3') and os.path.exists(wav_file):
             try:
                 os.remove(wav_file)
             except:
                 pass
             
-        full_transcript = " ".join(transcripts).strip()
-        return full_transcript
+        return " ".join(transcripts).strip()
     except Exception as e:
         raise Exception(f"Failed to convert audio to text: {str(e)}")
 

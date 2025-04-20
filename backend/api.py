@@ -83,30 +83,42 @@ async def summarize(
     url = None
     json_body = None
     
-    if request.headers.get('content-type') == 'application/json':
-        try:
-            json_body = json.loads(body_bytes)
-            logger.info(f"Parsed JSON body: {json_body}")
-            url = json_body.get('url')
-            if language is None:
-                language = json_body.get('language', 'English')
-        except Exception as e:
-            logger.error(f"Failed to parse JSON body: {e}")
-    
-    # Default language if not provided
-    if language is None:
-        language = "English"
-    
-    logger.info(f"Processing request with URL: {url}, File: {file.filename if file else None}, Language: {language}")
-    
-    if not url and not file:
-        logger.warning("Request missing both URL and file")
-        return JSONResponse(
-            status_code=400,
-            content={"detail": "Either URL or file must be provided"}
-        )
-    
     try:
+        if request.headers.get('content-type') == 'application/json':
+            try:
+                json_body = json.loads(body_bytes)
+                logger.info(f"Parsed JSON body: {json_body}")
+                url = json_body.get('url')
+                if language is None:
+                    language = json_body.get('language', 'English')
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON body: {e}")
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": f"Invalid JSON body: {str(e)}"}
+                )
+        
+        # Default language if not provided
+        if language is None:
+            language = "English"
+        
+        logger.info(f"Processing request with URL: {url}, File: {file.filename if file else None}, Language: {language}")
+        
+        if not url and not file:
+            logger.warning("Request missing both URL and file")
+            return JSONResponse(
+                status_code=400,
+                content={"detail": "Either URL or file must be provided"}
+            )
+        
+        # Validate language
+        if language not in language_code_map:
+            logger.warning(f"Unsupported language: {language}")
+            return JSONResponse(
+                status_code=400,
+                content={"detail": f"Unsupported language: {language}. Supported languages are {', '.join(language_code_map.keys())}"}
+            )
+        
         # Process YouTube URL
         if url:
             logger.info(f"Validating YouTube URL: {url}")
@@ -118,8 +130,15 @@ async def summarize(
                 
                 # Download audio
                 logger.info(f"Downloading audio from YouTube ID: {video_id}")
-                audio_file = download_audio(standard_url)
-                logger.info(f"Downloaded audio file: {audio_file}")
+                try:
+                    audio_file = download_audio(standard_url)
+                    logger.info(f"Downloaded audio file: {audio_file}")
+                except Exception as e:
+                    logger.error(f"Failed to download audio: {str(e)}")
+                    return JSONResponse(
+                        status_code=500,
+                        content={"detail": f"Failed to download audio: {str(e)}"}
+                    )
             except ValueError as ve:
                 logger.error(f"Invalid YouTube URL: {str(ve)}")
                 return JSONResponse(
@@ -171,8 +190,15 @@ async def summarize(
                     temp_path = temp_file.name
                 
                 logger.info(f"Saved uploaded file to temp path: {temp_path}")
-                original_text = audio_to_text(temp_path)
-                logger.info(f"Transcribed text length: {len(original_text)} characters")
+                try:
+                    original_text = audio_to_text(temp_path)
+                    logger.info(f"Transcribed text length: {len(original_text)} characters")
+                except Exception as e:
+                    logger.error(f"Failed to transcribe audio: {str(e)}")
+                    return JSONResponse(
+                        status_code=500,
+                        content={"detail": f"Failed to transcribe audio: {str(e)}"}
+                    )
                 
                 # If we got no transcribed text, return an error
                 if not original_text.strip():
@@ -251,11 +277,11 @@ async def summarize(
         return JSONResponse(content=response_data)
     
     except Exception as e:
-        logger.error(f"Error processing request: {str(e)}")
+        logger.error(f"Unhandled exception in summarize endpoint: {str(e)}")
         logger.error(traceback.format_exc())
         return JSONResponse(
             status_code=500,
-            content={"detail": f"Server error: {str(e)}"}
+            content={"detail": f"An error occurred while processing the request: {str(e)}"}
         )
 
 @app.exception_handler(Exception)
