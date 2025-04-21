@@ -13,12 +13,33 @@ import { ProcessingLogs } from '@/components/processing-logs';
 export default function Home() {
   const [showProcessor, setShowProcessor] = useState(false);
   const [logMessages, setLogMessages] = useState<string[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingError, setProcessingError] = useState<string | null>(null);
 
   // Listen for processing logs
   useEffect(() => {
     const handleProcessingLog = (event: CustomEvent<string>) => {
       if (event.detail) {
-        setLogMessages(prev => [...prev, event.detail].slice(-50)); // Keep last 50 messages
+        const newMessage = event.detail;
+        setLogMessages(prev => [...prev, newMessage].slice(-50)); // Keep last 50 messages
+        
+        // Update processing status based on log messages
+        if (newMessage.toLowerCase().includes('start') || 
+            newMessage.toLowerCase().includes('downloading') ||
+            newMessage.toLowerCase().includes('processing')) {
+          setIsProcessing(true);
+          setProcessingError(null);
+        }
+        
+        if (newMessage.toLowerCase().includes('complete')) {
+          setIsProcessing(false);
+        }
+        
+        if (newMessage.toLowerCase().includes('error') || 
+            newMessage.toLowerCase().includes('failed')) {
+          setIsProcessing(false);
+          setProcessingError(newMessage);
+        }
       }
     };
     
@@ -145,6 +166,43 @@ export default function Home() {
           
           {/* Center/Right Column: Summary Display */}
           <div className="md:col-span-7 lg:col-span-8 xl:col-span-9 space-y-6">
+            {isProcessing && (
+              <div className="w-full bg-primary/5 border border-primary/20 rounded-lg p-4 mb-4 animate-pulse">
+                <div className="flex items-center">
+                  <div className="mr-3 animate-spin">
+                    <svg className="h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-primary text-sm">Processing Video</h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Please wait while we analyze and generate your summary...
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {processingError && !isProcessing && (
+              <div className="w-full bg-destructive/5 border border-destructive/20 rounded-lg p-4 mb-4">
+                <div className="flex items-center">
+                  <div className="mr-3 text-destructive">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-destructive text-sm">Processing Error</h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {processingError}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             <SummaryDisplay />
             
             {/* Processing Logs */}

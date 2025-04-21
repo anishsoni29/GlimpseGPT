@@ -19,7 +19,9 @@ import {
   VolumeX,
   SkipForward,
   SkipBack,
-  Expand
+  Expand,
+  ExternalLink,
+  AlertCircle
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
@@ -328,12 +330,33 @@ export function SummaryDisplay() {
     }
   }, [summaryData, toast]);
 
-  // Listen for summary data updates
+  // Function to handle summary data loading and debugging
   useEffect(() => {
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === 'summaryData' && event.newValue) {
         try {
-          setSummaryData(JSON.parse(event.newValue));
+          const parsedData = JSON.parse(event.newValue);
+          setSummaryData(parsedData);
+          
+          // Debug log for troubleshooting summary display issues
+          console.log("[Debug] Summary Data Loaded:", {
+            hasSummaryEn: !!parsedData?.summary_en,
+            summaryEnLength: parsedData?.summary_en?.length || 0,
+            hasSummaryTranslated: !!parsedData?.summary_translated,
+            summaryTranslatedLength: parsedData?.summary_translated?.length || 0,
+            hasOriginalText: !!parsedData?.original_text,
+            hasSegments: Array.isArray(parsedData?.transcript_segments) && parsedData?.transcript_segments.length > 0,
+            segmentsCount: parsedData?.transcript_segments?.length || 0
+          });
+          
+          // Add a visible error to trigger if summary is missing but metadata is present
+          if (parsedData?.thumbnail_url && (!parsedData?.summary_translated || parsedData.summary_translated.trim() === '')) {
+            console.error("[Error] Thumbnail exists but summary is missing");
+            // Dispatch a custom event for the processing logs
+            window.dispatchEvent(new CustomEvent('processingLog', { 
+              detail: "Error: Thumbnail loaded but summary is missing. Check API response." 
+            }));
+          }
         } catch (e) {
           console.error('Failed to parse summary data', e);
         }
@@ -396,589 +419,215 @@ export function SummaryDisplay() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isFullScreen]);
 
+  // Function to get the summary content to display
+  const getSummaryContent = useCallback(() => {
   if (!summaryData) {
     return (
-      <Card className="p-8 flex flex-col items-center justify-center border">
-          <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.5 }}
-        >
-          <FileAudio className="h-16 w-16 text-muted-foreground/50 mb-4" />
-          <p className="text-muted-foreground text-center">
-            Enter a YouTube URL or upload a file to get started
-          </p>
-        </motion.div>
-      </Card>
-    );
-  }
+        <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
+          <FileText className="h-12 w-12 mb-4 opacity-30" />
+          <p>No summary available yet. Please upload a video or audio file.</p>
+        </div>
+      );
+    }
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-    >
-      <AnimatePresence>
-        {isFullScreen && (
-          <motion.div
-            ref={fullScreenRef}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm"
-          >
-            <motion.div 
-              initial={{ scale: 0.9 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.9 }}
-              transition={{ type: "spring", stiffness: 300 }}
-              className="w-full max-w-4xl p-8 mx-4 rounded-lg shadow-2xl bg-card border"
-            >
-              <div className="flex justify-between items-center mb-6">
-                <motion.h2 
-                  initial={{ x: -20, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: 0.1 }}
-                  className="text-2xl font-bold flex items-center"
-                >
-                  <FileAudio className="h-6 w-6 mr-2 text-primary" />
-                  Full Transcript
-                </motion.h2>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={toggleFullScreen}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <motion.span
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                  >
-                    ESC to close ×
-                  </motion.span>
-                </Button>
-              </div>
-              
-              <ScrollArea className="h-[70vh] pr-4">
-                {summaryData.transcript_segments ? (
+    // Check if summary is actually available or not
+    const hasSummary = summaryData?.summary_translated && summaryData.summary_translated.trim().length > 0;
+
+    return (
                   <div className="space-y-4">
-                    {summaryData.transcript_segments.map((segment, idx) => (
-                      <motion.div 
-                        key={idx}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: idx * 0.01, duration: 0.3 }}
-                        className="group flex p-3 rounded-lg hover:bg-muted transition-colors"
-                      >
-                        <div className="w-16 flex-shrink-0 text-sm font-mono text-muted-foreground">
-                          {formatTimestamp(segment.start)}
-                        </div>
-                        <div className="flex-grow">{segment.text}</div>
-                      </motion.div>
-                    ))}
-                  </div>
-                ) : summaryData.original_text ? (
-                  <div className="whitespace-pre-wrap leading-relaxed">
-                    {summaryData.original_text}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground italic">No transcript available.</p>
-                )}
-              </ScrollArea>
-              
-              <div className="mt-6 flex justify-between">
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  onClick={toggleTranscriptAudio}
-                  className="transition-all duration-200 hover:bg-primary/10"
-                >
-                  {isTranscriptPlaying ? (
-                    <>
-                      <Pause className="h-4 w-4 mr-2" />
-                      Pause Audio
-                    </>
-                  ) : (
-                    <>
-                      <Play className="h-4 w-4 mr-2" />
-                      Play Audio
-                    </>
-                  )}
-                </Button>
-                
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  onClick={() => copyToClipboard(summaryData.original_text || "")}
-                  className="transition-all duration-200 hover:bg-primary/10"
-                >
-                  <Copy className="h-4 w-4 mr-2" />
-                  Copy Transcript
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      
-      <Card className="overflow-hidden border shadow-md">
-        <motion.div 
-          className="p-4 flex items-center justify-between border-b bg-muted/30"
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, type: "spring", stiffness: 300 }}
-        >
-          <div className="flex gap-2 items-center">
             {summaryData.thumbnail_url && (
-              <motion.img 
+          <div className="relative rounded-lg overflow-hidden mb-4 aspect-video">
+            <img 
                 src={summaryData.thumbnail_url} 
-                alt="Video thumbnail"
-                className="h-12 w-20 object-cover rounded shadow-sm"
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ 
-                  delay: 0.3, 
-                  type: "spring", 
-                  stiffness: 300 
-                }}
-                whileHover={{ 
-                  scale: 1.05,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
-                }}
-              />
-            )}
-            <motion.div
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.4, type: "spring" }}
-            >
+              alt={summaryData.title || "Video thumbnail"} 
+              className="w-full h-full object-cover"
+            />
               {summaryData.title && (
-                <motion.h3 
-                  className="font-semibold text-base truncate"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.5 }}
-                >
-                  {summaryData.title}
-                </motion.h3>
-              )}
-              {summaryData.language && (
-                <motion.div
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.6 }}
-                >
-                  <Badge variant="outline" className="text-xs">
-                  <Languages className="h-3 w-3 mr-1" />
-                    {summaryData.language}
-                  </Badge>
-                </motion.div>
-                )}
-            </motion.div>
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4">
+                <h3 className="text-white font-medium line-clamp-2">{summaryData.title}</h3>
               </div>
-        </motion.div>
+            )}
+              </div>
+        )}
         
-        <Tabs defaultValue="summary" value={activeTab} onValueChange={setActiveTab}>
-          <motion.div 
-            className="px-4 pt-4"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.7 }}
-          >
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="summary" className="transition-all duration-200 data-[state=active]:bg-primary/20">
-                <FileText className="h-4 w-4 mr-2" />
-                Summary
-              </TabsTrigger>
-              <TabsTrigger value="transcript" className="transition-all duration-200 data-[state=active]:bg-primary/20">
-                <FileAudio className="h-4 w-4 mr-2" />
-                Transcript
-              </TabsTrigger>
-            </TabsList>
-          </motion.div>
-          
-          <div className="p-4">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={activeTab}
-                initial={{ opacity: 0, x: activeTab === "summary" ? -20 : 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: activeTab === "summary" ? 20 : -20 }}
-                transition={{ duration: 0.2 }}
-              >
-                <TabsContent value="summary" className="mt-0 space-y-4">
-                  <ScrollArea className="h-52 border rounded-md p-4 bg-card/50">
-                    {summaryData.summary_translated ? (
-                      <p className="leading-relaxed">{summaryData.summary_translated}</p>
-                    ) : (
-                      <p className="text-muted-foreground italic">No summary available.</p>
-                    )}
-                  </ScrollArea>
-                  
-                  <div className="flex justify-between">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xl font-medium text-foreground">Summary</h3>
+          <div className="flex items-center space-x-2">
+            {hasSummary && (
+              <>
                 <Button 
-                      size="sm" 
-                  variant="outline" 
-                  onClick={handlePlayPause}
-                      className="transition-all duration-200 hover:bg-primary/10"
-                >
-                  {isPlaying ? (
-                        <>
-                          <Pause className="h-4 w-4 mr-2" />
-                          Pause
-                        </>
-                  ) : (
-                        <>
-                          <Play className="h-4 w-4 mr-2" />
-                          Listen
-                        </>
-                  )}
-                </Button>
-                    
-                    <div className="space-x-2">
-                <Button 
-                        size="sm" 
-                  variant="outline" 
+                  variant="ghost"
+                  size="icon"
                         onClick={() => copyToClipboard(summaryData.summary_translated || "")}
-                        className="transition-all duration-200 hover:bg-primary/10"
+                  className="h-8 w-8"
                       >
-                        <Copy className="h-4 w-4 mr-2" />
-                        {copied ? "Copied" : "Copy"}
+                  <Copy className="h-4 w-4" />
+                  <span className="sr-only">Copy summary</span>
                       </Button>
-                      
                       <Button 
-                        size="sm" 
-                        variant="outline" 
-                        onClick={downloadSummary}
-                        className="transition-all duration-200 hover:bg-primary/10"
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Download
+                  variant="ghost"
+                  size="icon"
+                  onClick={handlePlayPause}
+                  className="h-8 w-8"
+                >
+                  {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                  <span className="sr-only">{isPlaying ? "Pause" : "Play"}</span>
                       </Button>
+              </>
+            )}
                     </div>
                   </div>
                   
                   {summaryData.sentiment && (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 30 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ 
-                        type: "spring", 
-                        stiffness: 300, 
-                        damping: 20,
-                        delay: 0.3
-                      }}
-                      className="overflow-hidden rounded-lg border shadow-sm bg-black/5 dark:bg-white/5"
-                    >
-                      <div className="relative">
-                        {/* Background gradient based on sentiment */}
-                        <div 
-                          className={`absolute inset-0 opacity-10 ${
-                            summaryData.sentiment.label.toLowerCase().includes('label_1') || 
-                            summaryData.sentiment.label.toLowerCase().includes('positive')
-                              ? 'bg-gradient-to-r from-green-300 to-emerald-500' 
-                              : summaryData.sentiment.label.toLowerCase().includes('label_0') ||
-                                summaryData.sentiment.label.toLowerCase().includes('negative')
-                                ? 'bg-gradient-to-r from-red-300 to-red-500'
-                                : 'bg-gradient-to-r from-blue-300 to-indigo-500'
-                          }`}
-                        />
-                        
-                        {/* Sentiment header */}
-                        <div className="relative p-4 flex items-center justify-between border-b">
-                          <motion.div 
-                            className="flex items-center space-x-2"
-                            initial={{ x: -20, opacity: 0 }}
-                            animate={{ x: 0, opacity: 1 }}
-                            transition={{ delay: 0.4, type: "spring" }}
-                          >
-                            <motion.div
-                              initial={{ scale: 0 }}
-                              animate={{ scale: 1 }}
-                              transition={{ 
-                                type: "spring", 
-                                stiffness: 300,
-                                delay: 0.5
-                              }}
-                              className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                                summaryData.sentiment.label.toLowerCase().includes('label_1') || 
-                                summaryData.sentiment.label.toLowerCase().includes('positive')
-                                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
-                                  : summaryData.sentiment.label.toLowerCase().includes('label_0') ||
-                                    summaryData.sentiment.label.toLowerCase().includes('negative')
-                                    ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                              }`}
-                            >
-                              <Activity className="h-4 w-4" />
-                            </motion.div>
-                            <div>
-                              <motion.div 
-                                className="text-sm font-medium"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                transition={{ delay: 0.6 }}
-                              >
-                                Sentiment Analysis
-                              </motion.div>
-                              <motion.div 
-                                className="text-xs text-muted-foreground"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                transition={{ delay: 0.7 }}
-                              >
-                                {summaryData.sentiment.label.toLowerCase().includes('label_1') ? 'Positive' : 
-                                 summaryData.sentiment.label.toLowerCase().includes('label_0') ? 'Negative' : 
-                                 summaryData.sentiment.label}
-                              </motion.div>
-                            </div>
-                          </motion.div>
-                          
-                          <motion.div 
-                            initial={{ scale: 0.5, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            transition={{ 
-                              type: "spring",
-                              stiffness: 300,
-                              delay: 0.6 
-                            }}
-                            className="text-2xl font-bold"
-                          >
+          <div className="flex items-center gap-2 mb-2">
+            <Badge variant={
+              summaryData.sentiment.label === "positive" ? "success" :
+              summaryData.sentiment.label === "negative" ? "destructive" : "default"
+            } className="capitalize">
+              {summaryData.sentiment.label} 
+              <span className="ml-1 opacity-70">
                             {Math.round(summaryData.sentiment.score * 100)}%
-                          </motion.div>
+              </span>
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              {summaryData.language || "English"}
+            </span>
                         </div>
-                        
-                        {/* Sentiment meter */}
-                        <div className="p-4 pt-3">
-                          <div className="h-6 bg-black/5 dark:bg-white/5 rounded-full overflow-hidden relative">
-                            {/* Animated dots in background for visual flair */}
-                            <motion.div
-                              initial={{ opacity: 0 }}
-                              animate={{ opacity: 0.5 }}
-                              transition={{ delay: 0.7, duration: 1 }}
-                              className="absolute inset-0 flex justify-between px-1"
-                            >
-                              {[...Array(20)].map((_, i) => (
-                                <motion.div 
-                                  key={i}
-                                  initial={{ opacity: 0 }}
-                                  animate={{ opacity: i / 20 }}
-                                  transition={{ delay: 0.7 + (i * 0.02) }}
-                                  className="w-1 h-1 rounded-full bg-white/30 dark:bg-black/30 my-2.5"
-                                />
-                              ))}
-                            </motion.div>
-                            
-                            {/* Actual progress bar with animated fill */}
-                            <motion.div 
-                              initial={{ width: 0 }}
-                              animate={{ width: `${Math.round(summaryData.sentiment.score * 100)}%` }}
-                              transition={{ 
-                                delay: 0.8, 
-                                duration: 1.5,
-                                type: "spring",
-                                stiffness: 50,
-                                damping: 15
-                              }}
-                              className={`h-full relative ${
-                                summaryData.sentiment.label.toLowerCase().includes('label_1') || 
-                                summaryData.sentiment.label.toLowerCase().includes('positive')
-                                  ? 'bg-gradient-to-r from-green-400 to-emerald-600' 
-                                  : summaryData.sentiment.label.toLowerCase().includes('label_0') ||
-                                    summaryData.sentiment.label.toLowerCase().includes('negative')
-                                    ? 'bg-gradient-to-r from-red-400 to-red-600'
-                                    : 'bg-gradient-to-r from-blue-400 to-indigo-600'
-                              }`}
-                            >
-                              {/* Animated pulse effect */}
-                              <motion.div 
-                                animate={{ 
-                                  opacity: [0.2, 0.5, 0.2],
-                                  scale: [1, 1.05, 1]
-                                }}
-                                transition={{ 
-                                  duration: 2,
-                                  repeat: Infinity,
-                                  repeatType: "reverse" 
-                                }}
-                                className="absolute right-0 top-0 bottom-0 w-4 rounded-r-full bg-white/30"
-                              />
-                            </motion.div>
-                            
-                            {/* Percentage markers */}
-                            <div className="absolute inset-0 flex justify-between px-3 items-center pointer-events-none">
-                              {[0, 25, 50, 75, 100].map((mark) => (
-                                <motion.div 
-                                  key={mark}
-                                  initial={{ opacity: 0, y: 5 }}
-                                  animate={{ opacity: 0.7, y: 0 }}
-                                  transition={{ delay: 0.9 + (mark / 100) }}
-                                  className="text-[10px] text-white dark:text-gray-300 mix-blend-difference"
-                                >
-                                  {summaryData.sentiment && mark === Math.round(summaryData.sentiment.score * 100) && (
-                                    <motion.div 
-                                      className="absolute -mt-5 -ml-2.5 font-bold"
-                                      animate={{ y: [0, -3, 0] }}
-                                      transition={{ duration: 1.5, repeat: Infinity, repeatType: "reverse" }}
-                                    >
-                                      ▼
-                                    </motion.div>
-                                  )}
-                                </motion.div>
-                              ))}
+        )}
+        
+        {hasSummary ? (
+          <div className="text-foreground leading-relaxed p-4 rounded-lg bg-card/30 border border-border/10 shadow-sm">
+            {summaryData?.summary_translated?.split('\n').map((paragraph, index) => (
+              <p key={index} className={index > 0 ? "mt-4" : ""}>
+                {paragraph}
+              </p>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center p-6 text-muted-foreground bg-card/30 border border-border/10 rounded-lg">
+            <AlertCircle className="h-8 w-8 mb-2 text-amber-500" />
+            <p className="text-center font-medium mb-1">Summary Not Available</p>
+            <p className="text-center text-sm max-w-md">
+              The summary could not be generated. This might be due to processing error or lack of speech content in the video.
+              You can try again or check the transcript tab.
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  }, [summaryData, isPlaying, handlePlayPause, copyToClipboard]);
+
+  // Function to get the transcript content
+  const getTranscriptContent = useCallback(() => {
+    if (!summaryData?.original_text) {
+      return (
+        <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
+          <FileAudio className="h-12 w-12 mb-4 opacity-30" />
+          <p>No transcript available.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xl font-medium text-foreground">Full Transcript</h3>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => copyToClipboard(summaryData.original_text || "")}
+              className="h-8 w-8"
+            >
+              <Copy className="h-4 w-4" />
+              <span className="sr-only">Copy transcript</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTranscriptAudio}
+              className="h-8 w-8"
+            >
+              {isTranscriptPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+              <span className="sr-only">{isTranscriptPlaying ? "Pause" : "Play"}</span>
+            </Button>
                             </div>
                           </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </TabsContent>
                 
-                <TabsContent value="transcript" className="mt-0 space-y-4">
-                  <ScrollArea className="h-52 border rounded-md p-4 bg-card/50">
-                    {summaryData.transcript_segments ? (
+        <div className="text-foreground leading-relaxed p-4 rounded-lg bg-card/30 border border-border/10 shadow-sm text-sm max-h-[400px] overflow-auto">
+          {summaryData.transcript_segments && summaryData.transcript_segments.length > 0 ? (
                       <div className="space-y-2">
-                        {summaryData.transcript_segments.map((segment, idx) => (
-                          <div key={idx} className="flex text-sm hover:bg-muted/40 p-1 rounded">
-                            <div className="w-12 flex-shrink-0 font-mono text-muted-foreground">
+              {summaryData.transcript_segments.map((segment, index) => (
+                <div key={index} className="flex flex-col space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground font-mono">
                               {formatTimestamp(segment.start)}
+                    </span>
+                    <div className="h-px flex-1 bg-border/40"></div>
                             </div>
-                            <div className="flex-grow">{segment.text}</div>
+                  <p>{segment.text}</p>
                           </div>
                         ))}
                       </div>
-                    ) : summaryData.original_text ? (
-                      <p className="leading-relaxed">{summaryData.original_text}</p>
-                    ) : (
-                      <p className="text-muted-foreground italic">No transcript available.</p>
-                    )}
-                  </ScrollArea>
-                  
-                  <div className="flex justify-between">
-                    <div className="flex gap-2">
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        onClick={toggleTranscriptAudio}
-                        className="transition-all duration-200 hover:bg-primary/10"
-                      >
-                        {isTranscriptPlaying ? (
-                          <>
-                            <Pause className="h-4 w-4 mr-2" />
-                            Pause
-                          </>
-                        ) : (
-                          <>
-                            <Play className="h-4 w-4 mr-2" />
-                            Listen
-                          </>
-                        )}
-                      </Button>
-                      
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        onClick={toggleFullScreen}
-                        className="transition-all duration-200 hover:bg-primary/10"
-                      >
-                        <Expand className="h-4 w-4 mr-2" />
-                        Full Screen
-                      </Button>
-                    </div>
-                    
+          ) : (
+            <div>
+              {summaryData.original_text.split('\n').map((paragraph, index) => (
+                <p key={index} className={index > 0 ? "mt-4" : ""}>
+                  {paragraph}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }, [summaryData, isTranscriptPlaying, toggleTranscriptAudio, copyToClipboard, formatTimestamp]);
+
+  // Function to get the audio player content
+  const getAudioPlayerContent = useCallback(() => {
+    if (!showAudioPlayer) return null;
+    
+    return (
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 20 }}
+        className="fixed bottom-4 left-4 right-4 md:left-1/2 md:right-auto md:w-[500px] md:-translate-x-1/2 bg-background rounded-lg shadow-lg border border-border z-50"
+      >
+        <div className="p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="font-medium text-sm">
+              {isPlaying ? "Playing Summary" : isTranscriptPlaying ? "Playing Transcript" : "Audio Controls"}
+            </h4>
                     <Button 
-                      size="sm" 
-                      variant="outline" 
-                      onClick={() => copyToClipboard(summaryData.original_text || "")}
-                      className="transition-all duration-200 hover:bg-primary/10"
-                    >
-                      <Copy className="h-4 w-4 mr-2" />
-                      Copy
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowAudioPlayer(false)}
+              className="h-6 w-6"
+            >
+              <span className="sr-only">Close player</span>
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M1 1L9 9M9 1L1 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
                     </Button>
                   </div>
-                </TabsContent>
-              </motion.div>
-            </AnimatePresence>
-            
-            {/* Audio Player */}
-            <AnimatePresence>
-              {showAudioPlayer && (
-                <motion.div
-                  initial={{ opacity: 0, y: -20, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10, scale: 0.9 }}
-                  transition={{ type: "spring", stiffness: 300, damping: 25 }}
-                  className="mt-4 p-3 border rounded-md bg-card/80 backdrop-blur-sm shadow-lg"
-                >
-                  <div className="flex flex-col space-y-2">
-                    <div className="flex items-center justify-between">
-                      <motion.div 
-                        initial={{ x: -5, opacity: 0 }}
-                        animate={{ x: 0, opacity: 1 }}
-                        transition={{ delay: 0.1 }}
-                        className="text-sm font-medium flex items-center"
-                      >
-                        <motion.span
-                          animate={{ 
-                            scale: [1, 1.1, 1],
-                            color: ['#6366f1', '#818cf8', '#6366f1'] 
-                          }}
-                          transition={{ 
-                            duration: 2, 
-                            repeat: Infinity,
-                            repeatType: "reverse" 
-                          }}
-                          style={{ display: 'inline-block', marginRight: '6px' }}
-                        >
-                          {isPlaying || isTranscriptPlaying ? "▶️" : "🔊"}
-                        </motion.span>
-                        Audio Player
-                      </motion.div>
-                      <motion.div 
-                        className="text-xs text-muted-foreground"
-                        initial={{ x: 5, opacity: 0 }}
-                        animate={{ x: 0, opacity: 1 }}
-                        transition={{ delay: 0.2 }}
-                      >
-                        {formatTime(currentTime)} / {formatTime(duration)}
-                      </motion.div>
+          
+          <div className="mb-2">
+            <Progress value={(currentTime / duration) * 100} className="h-1" />
                       </div>
                     
-                    <motion.div
-                      initial={{ scaleX: 0 }}
-                      animate={{ scaleX: 1 }}
-                      transition={{ duration: 0.3 }}
-                      style={{ transformOrigin: 'left' }}
-                    >
-                      <Progress value={(currentTime / duration) * 100} className="h-1 w-full" />
-                </motion.div>
-                    
                     <div className="flex items-center justify-between">
-                      <motion.div 
-                        className="flex items-center space-x-1"
-                        initial={{ y: 10, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.3, type: "spring" }}
-                      >
+            <div className="flex items-center gap-2">
                         <Button
                           variant="ghost" 
                           size="icon" 
-                          onClick={() => skipAudio(-10)}
-                          className="h-8 w-8"
-                        >
-                          <SkipBack className="h-4 w-4" />
-                        </Button>
-                        
-                <motion.div
-                          whileTap={{ scale: 0.9 }}
-                          whileHover={{ scale: 1.1 }}
-                        >
-                          <Button
-                            variant={isPlaying || isTranscriptPlaying ? "secondary" : "outline"}
-                            size="icon"
-                            onClick={isPlaying ? handlePlayPause : toggleTranscriptAudio}
+                onClick={() => {
+                  if (isPlaying) {
+                    handlePlayPause();
+                  } else if (isTranscriptPlaying) {
+                    toggleTranscriptAudio();
+                  }
+                }}
                             className="h-8 w-8"
                           >
                             {isPlaying || isTranscriptPlaying ? (
@@ -986,74 +635,119 @@ export function SummaryDisplay() {
                             ) : (
                               <Play className="h-4 w-4" />
                             )}
+                <span className="sr-only">{isPlaying || isTranscriptPlaying ? "Pause" : "Play"}</span>
                           </Button>
-                        </motion.div>
                         
                         <Button
                           variant="ghost" 
                           size="icon" 
-                          onClick={() => skipAudio(10)}
+                onClick={() => setIsMuted(!isMuted)}
                           className="h-8 w-8"
                         >
-                          <SkipForward className="h-4 w-4" />
+                {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume className="h-4 w-4" />}
+                <span className="sr-only">{isMuted ? "Unmute" : "Mute"}</span>
                         </Button>
-                </motion.div>
-
-                <motion.div
-                        className="flex items-center space-x-2"
-                        initial={{ y: 10, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.4, type: "spring" }}
-                      >
+              
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground">{formatTime(currentTime)}</span>
+                <span className="text-xs text-muted-foreground">/</span>
+                <span className="text-xs text-muted-foreground">{formatTime(duration)}</span>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handlePlaybackRateChange(0.5)}
+                className={`h-6 px-2 text-xs ${playbackRate === 0.5 ? "bg-muted" : ""}`}
+              >
+                0.5x
+              </Button>
                         <Button 
                           variant="ghost" 
-                          size="icon" 
-                          onClick={toggleMute}
-                          className="h-8 w-8"
-                        >
-                          {isMuted ? (
-                            <VolumeX className="h-4 w-4" />
-                          ) : (
-                            <Volume className="h-4 w-4" />
-                          )}
+                size="sm"
+                onClick={() => handlePlaybackRateChange(1)}
+                className={`h-6 px-2 text-xs ${playbackRate === 1 ? "bg-muted" : ""}`}
+              >
+                1x
                         </Button>
-                        
-                        <div className="w-20">
-                          <Slider
-                            value={[volume * 100]}
-                            min={0}
-                            max={100}
-                            step={1}
-                            onValueChange={(values) => handleVolumeChange(values[0] / 100)}
-                            className="h-2"
-                          />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handlePlaybackRateChange(1.5)}
+                className={`h-6 px-2 text-xs ${playbackRate === 1.5 ? "bg-muted" : ""}`}
+              >
+                1.5x
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handlePlaybackRateChange(2)}
+                className={`h-6 px-2 text-xs ${playbackRate === 2 ? "bg-muted" : ""}`}
+              >
+                2x
+              </Button>
                         </div>
-                        
-                        <div className="flex items-center space-x-1 ml-2">
-                          <span className="text-xs font-medium">Speed:</span>
-                          <select
-                            value={playbackRate.toString()}
-                            onChange={(e) => handlePlaybackRateChange(parseFloat(e.target.value))}
-                            className="text-xs bg-transparent border rounded px-1"
-                          >
-                            <option value="0.5">0.5x</option>
-                            <option value="0.75">0.75x</option>
-                            <option value="1">1x</option>
-                            <option value="1.25">1.25x</option>
-                            <option value="1.5">1.5x</option>
-                            <option value="1.75">1.75x</option>
-                            <option value="2">2x</option>
-                          </select>
-                        </div>
-                      </motion.div>
                     </div>
                   </div>
                 </motion.div>
-              )}
+    );
+  }, [
+    showAudioPlayer, isPlaying, isTranscriptPlaying, currentTime, duration, 
+    isMuted, playbackRate, handlePlayPause, toggleTranscriptAudio, 
+    handlePlaybackRateChange, formatTime
+  ]);
+
+  return (
+    <>
+      <AnimatePresence>
+        {getAudioPlayerContent()}
             </AnimatePresence>
+
+      <Card className="bg-card/60 backdrop-blur-sm border border-border/40 overflow-hidden" ref={fullScreenRef}>
+        {!summaryData ? (
+          <div className="flex flex-col items-center justify-center p-6 h-64 text-muted-foreground">
+            <FileText className="h-12 w-12 mb-4 opacity-30" />
+            <p className="text-center max-w-xs">
+              Upload a video or audio file to see the summary here
+            </p>
           </div>
+        ) : (
+          <>
+            <div className="flex justify-end p-2">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-8 w-8" 
+                onClick={() => setIsFullScreen(!isFullScreen)}
+              >
+                <Expand className="h-4 w-4" />
+                <span className="sr-only">Toggle fullscreen</span>
+              </Button>
+            </div>
+            <Tabs 
+              defaultValue={activeTab} 
+              value={activeTab} 
+              onValueChange={setActiveTab} 
+              className="p-4"
+            >
+              <TabsList className="grid grid-cols-2 w-full">
+                <TabsTrigger value="summary">Summary</TabsTrigger>
+                <TabsTrigger value="transcript">Transcript</TabsTrigger>
+              </TabsList>
+              <ScrollArea className={`mt-4 ${isFullScreen ? 'h-[calc(100vh-200px)]' : 'max-h-[600px]'}`}>
+                <TabsContent value="summary" className="mt-0 p-2">
+                  {getSummaryContent()}
+                </TabsContent>
+                <TabsContent value="transcript" className="mt-0 p-2">
+                  {getTranscriptContent()}
+                </TabsContent>
+              </ScrollArea>
           </Tabs>
+          </>
+        )}
       </Card>
-    </motion.div>
+    </>
   );
 }

@@ -193,6 +193,66 @@ export function VideoUpload() {
     window.dispatchEvent(event);
   };
 
+  // Function to process API response and validate summary
+  const processApiResponse = (data: any) => {
+    // Validate that we actually have a summary
+    if (!data.summary_translated || data.summary_translated.trim() === '') {
+      logProcessingEvent("Warning: Received empty summary from API");
+      
+      // Try to regenerate the summary if needed
+      if (data.original_text && data.original_text.trim().length > 0) {
+        logProcessingEvent("Attempting to create a fallback summary from transcript...");
+        // Use the first few sentences as a basic summary if API didn't provide one
+        const sentences = data.original_text.split('. ');
+        const fallbackSummary = sentences.slice(0, 3).join('. ') + '.';
+        data.summary_translated = fallbackSummary;
+        data.summary_en = fallbackSummary;
+        logProcessingEvent("Created fallback summary from transcript");
+      } else {
+        logProcessingEvent("Error: No valid summary or transcript content available");
+        throw new Error("Failed to generate summary - no valid content found in the video");
+      }
+    }
+    
+    // Transform raw transcript into segments with timestamps if they don't exist
+    if (data.original_text && !data.transcript_segments) {
+      const approximateSegmentLength = 120; // characters
+      const text = data.original_text;
+      const textLength = text.length;
+      const segments = [];
+      let segmentCount = Math.ceil(textLength / approximateSegmentLength);
+      
+      // Create roughly equal segments with approximated timestamps
+      for (let i = 0; i < segmentCount; i++) {
+        const start = Math.floor((i / segmentCount) * 600); // Assuming 10 minutes total for calculation
+        const end = Math.floor(((i + 1) / segmentCount) * 600);
+        const startIdx = Math.floor((i / segmentCount) * textLength);
+        const endIdx = i === segmentCount - 1 
+          ? textLength 
+          : Math.floor(((i + 1) / segmentCount) * textLength);
+          
+        // Find sentence boundary if possible
+        let segmentEndIdx = endIdx;
+        if (i < segmentCount - 1) {
+          const nextPeriod = text.indexOf('. ', startIdx, endIdx + 20);
+          if (nextPeriod > startIdx && nextPeriod < endIdx + 20) {
+            segmentEndIdx = nextPeriod + 1;
+          }
+        }
+        
+        segments.push({
+          text: text.substring(startIdx, segmentEndIdx).trim(),
+          start,
+          end
+        });
+      }
+      
+      data.transcript_segments = segments;
+    }
+    
+    return data;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -240,48 +300,15 @@ export function VideoUpload() {
 
       const data = await response.json();
       
-      // Transform raw transcript into segments with timestamps if they don't exist
-      if (data.original_text && !data.transcript_segments) {
-        const approximateSegmentLength = 120; // characters
-        const text = data.original_text;
-        const textLength = text.length;
-        const segments = [];
-        let segmentCount = Math.ceil(textLength / approximateSegmentLength);
-        
-        // Create roughly equal segments with approximated timestamps
-        for (let i = 0; i < segmentCount; i++) {
-          const start = Math.floor((i / segmentCount) * 600); // Assuming 10 minutes total for calculation
-          const end = Math.floor(((i + 1) / segmentCount) * 600);
-          const startIdx = Math.floor((i / segmentCount) * textLength);
-          const endIdx = i === segmentCount - 1 
-            ? textLength 
-            : Math.floor(((i + 1) / segmentCount) * textLength);
-            
-          // Find sentence boundary if possible
-          let segmentEndIdx = endIdx;
-          if (i < segmentCount - 1) {
-            const nextPeriod = text.indexOf('. ', startIdx, endIdx + 20);
-            if (nextPeriod > startIdx && nextPeriod < endIdx + 20) {
-              segmentEndIdx = nextPeriod + 1;
-            }
-          }
-          
-          segments.push({
-            text: text.substring(startIdx, segmentEndIdx).trim(),
-            start,
-            end
-          });
-        }
-        
-        data.transcript_segments = segments;
-      }
+      // Process and validate the API response
+      const processedData = processApiResponse(data);
       
       setProgress(100);
       logProcessingEvent("Processing complete!");
       
       // Save and broadcast results
-      localStorage.setItem('summaryData', JSON.stringify(data));
-      window.dispatchEvent(new CustomEvent('summaryUpdated', { detail: data }));
+      localStorage.setItem('summaryData', JSON.stringify(processedData));
+      window.dispatchEvent(new CustomEvent('summaryUpdated', { detail: processedData }));
       
       toast({ title: "Processing complete" });
     } catch (error) {
@@ -354,48 +381,15 @@ export function VideoUpload() {
       
       const data = await response.json();
       
-      // Transform raw transcript into segments with timestamps if they don't exist
-      if (data.original_text && !data.transcript_segments) {
-        const approximateSegmentLength = 120; // characters
-        const text = data.original_text;
-        const textLength = text.length;
-        const segments = [];
-        let segmentCount = Math.ceil(textLength / approximateSegmentLength);
-        
-        // Create roughly equal segments with approximated timestamps
-        for (let i = 0; i < segmentCount; i++) {
-          const start = Math.floor((i / segmentCount) * 600); // Assuming 10 minutes total for calculation
-          const end = Math.floor(((i + 1) / segmentCount) * 600);
-          const startIdx = Math.floor((i / segmentCount) * textLength);
-          const endIdx = i === segmentCount - 1 
-            ? textLength 
-            : Math.floor(((i + 1) / segmentCount) * textLength);
-            
-          // Find sentence boundary if possible
-          let segmentEndIdx = endIdx;
-          if (i < segmentCount - 1) {
-            const nextPeriod = text.indexOf('. ', startIdx, endIdx + 20);
-            if (nextPeriod > startIdx && nextPeriod < endIdx + 20) {
-              segmentEndIdx = nextPeriod + 1;
-            }
-          }
-          
-          segments.push({
-            text: text.substring(startIdx, segmentEndIdx).trim(),
-            start,
-            end
-          });
-        }
-        
-        data.transcript_segments = segments;
-      }
+      // Process and validate the API response
+      const processedData = processApiResponse(data);
       
       setProgress(100);
       logProcessingEvent("Processing complete!");
       
       // Save and broadcast result
-      localStorage.setItem('summaryData', JSON.stringify(data));
-      window.dispatchEvent(new CustomEvent('summaryUpdated', { detail: data }));
+      localStorage.setItem('summaryData', JSON.stringify(processedData));
+      window.dispatchEvent(new CustomEvent('summaryUpdated', { detail: processedData }));
       
       toast({ title: "Processing complete" });
     } catch (error) {

@@ -19,6 +19,7 @@ from main import (
     sentiment_pipeline,
     language_code_map
 )
+import yt_dlp
 
 # Set up logging
 logging.basicConfig(
@@ -156,8 +157,13 @@ async def summarize(
             try:
                 logger.info(f"Transcribing audio from: {audio_file}")
                 logger.info("Progress update: Transcribing audio to text")
-                original_text = audio_to_text(audio_file)
-                logger.info(f"Transcribed text length: {len(original_text)} characters")
+                transcription_result = audio_to_text(audio_file)
+                
+                # Extract full text and segments
+                original_text = transcription_result["full_text"]
+                transcript_segments = transcription_result["segments"]
+                
+                logger.info(f"Transcribed text length: {len(original_text)} characters, with {len(transcript_segments)} segments")
                 
                 # If we got no transcribed text, return an error
                 if not original_text.strip():
@@ -193,8 +199,13 @@ async def summarize(
                 
                 logger.info(f"Saved uploaded file to temp path: {temp_path}")
                 try:
-                    original_text = audio_to_text(temp_path)
-                    logger.info(f"Transcribed text length: {len(original_text)} characters")
+                    transcription_result = audio_to_text(temp_path)
+                    
+                    # Extract full text and segments
+                    original_text = transcription_result["full_text"]
+                    transcript_segments = transcription_result["segments"]
+                    
+                    logger.info(f"Transcribed text length: {len(original_text)} characters, with {len(transcript_segments)} segments")
                 except Exception as e:
                     logger.error(f"Failed to transcribe audio: {str(e)}")
                     return JSONResponse(
@@ -229,6 +240,17 @@ async def summarize(
         try:
             summary_en = summarize_text(original_text)
             logger.info(f"Summary generated, length: {len(summary_en)} characters")
+            
+            # Validate summary content
+            if not summary_en or len(summary_en.strip()) == 0:
+                logger.error("Generated summary is empty")
+                return JSONResponse(
+                    status_code=500,
+                    content={"detail": "Failed to generate a meaningful summary from the content"}
+                )
+                
+            # Log summary for debugging (only in development)
+            logger.info(f"Summary content preview: {summary_en[:100]}...")
         except Exception as e:
             logger.error(f"Failed to summarize text: {str(e)}")
             return JSONResponse(
@@ -276,8 +298,34 @@ async def summarize(
             "sentiment": {
                 "label": sentiment_label,
                 "score": sentiment_score
-            }
+            },
+            "transcript_segments": transcript_segments
         }
+        
+        # Log response structure (without full content) for debugging
+        logger.info(f"Response structure: keys={list(response_data.keys())}")
+        logger.info(f"Summary length: original={len(summary_en)}, translated={len(summary_translated)}")
+        
+        # Additional metadata if available from YouTube
+        if url:
+            try:
+                # Try to extract thumbnail and title
+                with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+                    video_info = ydl.extract_info(url, download=False)
+                    
+                    if video_info:
+                        # Get best thumbnail
+                        thumbnails = video_info.get('thumbnails', [])
+                        thumbnails.sort(key=lambda x: x.get('height', 0) * x.get('width', 0), reverse=True)
+                        
+                        if thumbnails:
+                            response_data["thumbnail_url"] = thumbnails[0]['url']
+                        
+                        # Get title
+                        if 'title' in video_info:
+                            response_data["title"] = video_info['title']
+            except Exception as e:
+                logger.warning(f"Could not extract additional metadata: {str(e)}")
         
         logger.info("Successfully processed request, returning response")
         return JSONResponse(content=response_data)
