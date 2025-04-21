@@ -1,4 +1,7 @@
 import os
+# Set the TOKENIZERS_PARALLELISM environment variable to avoid warnings
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import re
 import yt_dlp
 import speech_recognition as sr
@@ -210,15 +213,31 @@ def audio_to_text(audio_file, chunk_duration=15):
 def summarize_text(text):
     try:
         logger.info(f"Summarizing text of length {len(text)} characters")
+        text = text.strip()
+        
+        # Skip summarization if text is too short or empty
+        if len(text) < 100:
+            logger.warning("Text too short for summarization")
+            return text
+            
         max_input_length = 1024
-
-        # Strategy 1: Try the long-context summarizer for very long texts
+        
+        # Attempt to improve summarization by extracting key information first
+        # This helps focus the summary on important content
+        key_information = extract_key_information(text)
+        
+        # Strategy 1: Try the long-context summarizer for best quality
         if len(text) > 2000 and long_summarizer_model is not None and long_summarizer_tokenizer is not None:
             try:
-                logger.info("Using long-context summarizer")
-                # This model can handle much longer inputs (up to 16k tokens)
+                logger.info("Using high-quality long-context summarizer")
+                # Limit text to prevent overflow but ensure enough context
+                truncated_text = text[:10000] if len(text) > 10000 else text
+                
+                # Add instructions to the model to get a better summary
+                enhanced_prompt = f"Below is a transcript from a video. Please provide a concise summary highlighting the key points, main ideas, and essential information so someone doesn't need to watch the full video:\n\n{truncated_text}"
+                
                 inputs = long_summarizer_tokenizer(
-                    text[:16000],  # Limit text to prevent overflow
+                    enhanced_prompt,
                     max_length=16384,
                     return_tensors="pt",
                     truncation=True
@@ -227,7 +246,7 @@ def summarize_text(text):
                 with torch.no_grad():
                     summary_ids = long_summarizer_model.generate(
                         inputs["input_ids"],
-                        max_length=500,
+                        max_length=300,
                         min_length=100,
                         length_penalty=2.0,
                         num_beams=4,
@@ -236,86 +255,228 @@ def summarize_text(text):
                 
                 summary = long_summarizer_tokenizer.decode(summary_ids[0], skip_special_tokens=True)
                 logger.info(f"Long-context summary generated, length: {len(summary)} characters")
-                return summary
-            except Exception as e:
-                logger.warning(f"Long-context summarizer failed: {str(e)}. Falling back to chunked approach.")
                 
-        # Strategy 2: Use our main summarizer with chunking for medium-sized texts
+                # Improve summary formatting by adding section headers
+                formatted_summary = format_summary(summary)
+                
+                if len(formatted_summary.strip()) > 100:
+                    return formatted_summary
+                logger.warning("Long-context summarizer returned inadequate result, trying alternatives.")
+            except Exception as e:
+                logger.warning(f"Long-context summarizer failed: {str(e)}. Trying alternatives.")
+        
+        # Strategy 2: For shorter texts, use the main summarizer
         if main_summarizer is not None:
             try:
-                logger.info("Using main summarizer with chunking")
-                # Handle long texts by splitting into chunks
+                logger.info("Using main summarizer with improved prompt")
+                # Add summary instruction to the beginning
+                if len(text) > 10000:
+                    text = text[:10000]
+                    logger.info("Text truncated to 10,000 characters for better processing")
+                
+                # Create an enhanced prompt for better summary quality
+                enhanced_prompt = f"Summarize this video transcript highlighting key points, main ideas, and important takeaways: {text[:max_input_length-100]}"
+                
+                summary = main_summarizer(
+                    enhanced_prompt,
+                    max_length=200, 
+                    min_length=80, 
+                    do_sample=False,
+                    num_beams=4
+                )
+                
+                result = summary[0]['summary_text']
+                formatted_result = format_summary(result)
+                logger.info(f"Enhanced summary generated, length: {len(formatted_result)} characters")
+                
+                if len(formatted_result.strip()) > 80:
+                    return formatted_result
+                
+                # If the result isn't good enough, try another approach
+                logger.warning("Main summarizer returned inadequate result, trying chunked approach.")
+                
+                # Handle long texts by splitting into chunks and focusing on important parts
                 summaries = []
                 
-                # Process in chunks with overlap
-                for i in range(0, len(text), max_input_length - 100):
-                    chunk = text[i:i + max_input_length]
+                # Process text in chunks, focusing on beginning, middle and end
+                if len(text) > max_input_length * 3:
+                    chunks = [
+                        text[:max_input_length],  # Beginning
+                        text[len(text)//2 - max_input_length//2:len(text)//2 + max_input_length//2],  # Middle
+                        text[-max_input_length:]  # End
+                    ]
+                else:
+                    # Process in chunks with minimal overlap
+                    chunks = [text[i:i + max_input_length] for i in range(0, len(text), max_input_length - 100)]
+                
+                for i, chunk in enumerate(chunks):
                     if len(chunk) < 100:  # Skip very small chunks
                         continue
-                        
+                    
+                    # Add contextual prompts based on chunk position
+                    if i == 0:
+                        prompt = f"Summarize the introduction and initial points from this video transcript: {chunk}"
+                    elif i == len(chunks) - 1:
+                        prompt = f"Summarize the conclusion and final points from this video transcript: {chunk}"
+                    else:
+                        prompt = f"Summarize the main content from this video transcript: {chunk}"
+                    
                     summary = main_summarizer(
-                        chunk, 
+                        prompt,
                         max_length=150, 
                         min_length=30, 
-                        do_sample=False
+                        do_sample=False,
+                        num_beams=3
                     )
                     summaries.append(summary[0]['summary_text'])
                 
-                # If we have multiple summaries, combine and re-summarize
+                # If we have multiple summaries, process them better
                 if len(summaries) > 1:
-                    combined = " ".join(summaries)
-                    logger.info(f"Combined {len(summaries)} chunk summaries for final summarization")
+                    # Create a structured summary from the parts
+                    if len(summaries) >= 3:
+                        final_summary = "Key Points:\n"
+                        for i, part in enumerate(summaries):
+                            section = "Introduction" if i == 0 else "Conclusion" if i == len(summaries)-1 else f"Main Content {i}"
+                            final_summary += f"• {part}\n"
+                    else:
+                        final_summary = " ".join(summaries)
                     
-                    # Recursively summarize the combined text if it's still too long
-                    if len(combined) > max_input_length:
-                        return summarize_text(combined)
-                    
-                    # Otherwise summarize the combined text once more for coherence
-                    final_summary = main_summarizer(
-                        combined, 
-                        max_length=200, 
-                        min_length=75,
-                        do_sample=False
-                    )
-                    logger.info(f"Final summary generated, length: {len(final_summary[0]['summary_text'])} characters")
-                    return final_summary[0]['summary_text']
+                    logger.info(f"Structured summary from {len(summaries)} chunks, length: {len(final_summary)} characters")
+                    return format_summary(final_summary)
                 elif len(summaries) == 1:
                     logger.info(f"Single chunk summary generated, length: {len(summaries[0])} characters")
-                    return summaries[0]
+                    return format_summary(summaries[0])
                 else:
                     raise Exception("No valid summarization chunks generated")
             except Exception as e:
-                logger.warning(f"Main summarizer failed: {str(e)}. Falling back to fallback model.")
-                
-        # Strategy 3: Try fallback model as last resort
+                logger.warning(f"Main summarizer failed: {str(e)}. Using fallback approach.")
+        
+        # Strategy 3: Use the fallback summarizer as last resort
         if fallback_summarizer is not None:
             try:
-                logger.info("Using fallback summarizer")
-                if len(text) > max_input_length:
-                    text = text[:max_input_length]
-                    
+                logger.info("Using fallback summarizer with enhanced prompt")
+                enhanced_prompt = f"Create a concise summary of this video content highlighting the most important points: {text[:max_input_length-100]}"
+                
                 summary = fallback_summarizer(
-                    text, 
-                    max_length=150, 
-                    min_length=30, 
+                    enhanced_prompt, 
+                    max_length=200, 
+                    min_length=50, 
                     do_sample=False
                 )
-                logger.info(f"Fallback summary generated, length: {len(summary[0]['summary_text'])} characters")
-                return summary[0]['summary_text']
+                result = summary[0]['summary_text']
+                logger.info(f"Fallback summary generated, length: {len(result)} characters")
+                return format_summary(result)
             except Exception as e:
-                logger.error(f"Fallback summarizer also failed: {str(e)}")
-
-        # If all strategies fail, create a basic summary from first sentences
-        logger.warning("All summarizers failed! Creating basic summary from first sentences.")
-        sentences = text.split('. ')
-        basic_summary = '. '.join(sentences[:5]) + '.'
-        return basic_summary
+                logger.warning(f"Fallback summarizer failed: {str(e)}. Using basic approach.")
+                
+        # Create a basic summary based on key information extraction
+        if key_information:
+            logger.info("Creating summary from extracted key information")
+            return key_information
+                
+        # If all strategies fail, create a basic summary from key sections
+        logger.warning("All ML summarizers failed! Creating basic structured summary.")
+        if len(text) > 1000:
+            # Extract meaningful parts from beginning, middle and end
+            beginning = extract_sentences(text[:800], 3)
+            middle = extract_sentences(text[len(text)//2-400:len(text)//2+400], 2)
+            end = extract_sentences(text[-800:], 2)
+            
+            summary = "Summary Points:\n\n"
+            summary += f"• Introduction: {beginning}\n\n"
+            summary += f"• Main Content: {middle}\n\n"
+            summary += f"• Conclusion: {end}"
+            
+            logger.info(f"Created structured summary of length {len(summary)} characters")
+            return summary
+        else:
+            sentences = text.split('. ')
+            basic_summary = '. '.join(sentences[:5]) + '.'
+            return basic_summary
         
     except Exception as e:
         logger.error(f"Summarization error: {str(e)}")
         # Final emergency fallback - just return the beginning of the text
-        sentences = text.split('. ')
-        return '. '.join(sentences[:3]) + '.'
+        if len(text) > 500:
+            return "Summary could not be generated properly. Here's the beginning of the transcript:\n\n" + text[:500] + "..."
+        return text
+
+# Helper function to extract key information from text
+def extract_key_information(text):
+    try:
+        # Look for patterns that often indicate important information
+        key_patterns = [
+            r"(?i)(?:main|key|important)(?:\s+points?|\s+ideas?|\s+takeaways?|\s+concepts?)(?:\s+(?:are|include|is))?(?:\s*:)?",
+            r"(?i)(?:in\s+(?:summary|conclusion|essence))(?:\s*,)?",
+            r"(?i)(?:to\s+summarize)",
+            r"(?i)(?:benefits(?:\s+of)?)",
+            r"(?i)(?:advantages(?:\s+of)?)",
+            r"(?i)(?:features(?:\s+of)?)"
+        ]
+        
+        # Extract sentences following these patterns
+        important_sentences = []
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        
+        for i, sentence in enumerate(sentences):
+            for pattern in key_patterns:
+                if re.search(pattern, sentence):
+                    # Add this sentence and the next 3 sentences if available
+                    important_sentences.append(sentence)
+                    for j in range(1, 4):
+                        if i + j < len(sentences):
+                            important_sentences.append(sentences[i + j])
+        
+        # If we found important sentences, format them as a summary
+        if important_sentences:
+            summary = "Key Information:\n\n"
+            for i, sentence in enumerate(important_sentences[:10]):  # Limit to top 10 important sentences
+                summary += f"• {sentence.strip()}\n"
+            return summary
+        
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to extract key information: {str(e)}")
+        return None
+
+# Helper function to format a summary with better structure
+def format_summary(summary):
+    try:
+        # If summary already contains bullet points or numbers, return as is
+        if re.search(r'(?:^|\n)[•\-*\d]+\s', summary):
+            return summary
+            
+        # Split into paragraphs
+        paragraphs = summary.split('\n')
+        formatted = []
+        
+        if len(paragraphs) > 1:
+            for i, para in enumerate(paragraphs):
+                if para.strip():
+                    formatted.append(f"• {para.strip()}")
+            return "Key Points:\n\n" + "\n".join(formatted)
+        else:
+            # Split into sentences and add bullets
+            sentences = re.split(r'(?<=[.!?])\s+', summary)
+            formatted = ["Key Points:"]
+            
+            for sentence in sentences:
+                if len(sentence.strip()) > 10:  # Only include meaningful sentences
+                    formatted.append(f"• {sentence.strip()}")
+            
+            return "\n\n".join(formatted)
+    except Exception as e:
+        logger.warning(f"Failed to format summary: {str(e)}")
+        return summary
+
+# Helper function to extract the most informative sentences
+def extract_sentences(text, count=3):
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    # Filter out very short sentences
+    meaningful_sentences = [s for s in sentences if len(s.split()) > 5]
+    # Return the requested number of sentences or all if fewer
+    selected = meaningful_sentences[:count] if len(meaningful_sentences) > count else meaningful_sentences
+    return ' '.join(selected)
 
 # Function to translate text using the M2M100 model
 def translate_text(text, target_language_code):

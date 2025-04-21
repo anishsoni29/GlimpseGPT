@@ -16,6 +16,7 @@ export function ProcessingLogs({ messages: initialMessages }: ProcessingLogsProp
   const [messages, setMessages] = useState<string[]>(initialMessages);
   const [backendLogs, setBackendLogs] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'frontend' | 'backend'>('backend'); // Default to backend logs
   
   useEffect(() => {
     // Auto-scroll to bottom on new messages
@@ -37,7 +38,18 @@ export function ProcessingLogs({ messages: initialMessages }: ProcessingLogsProp
       if (response.ok) {
         const data = await response.json();
         if (Array.isArray(data.logs)) {
+          // Check if we have new logs
+          const hasNewLogs = data.logs.length > backendLogs.length;
           setBackendLogs(data.logs);
+          
+          // If there are backend logs, dispatch them as events to be picked up by the frontend
+          if (data.logs.length > 0 && hasNewLogs) {
+            // Get the last message that hasn't been seen in frontend logs
+            const lastMessage = data.logs[data.logs.length - 1];
+            // Dispatch the event so it can be picked up by the app
+            const event = new CustomEvent('processingLog', { detail: lastMessage });
+            window.dispatchEvent(event);
+          }
         }
       }
     } catch (error) {
@@ -50,7 +62,7 @@ export function ProcessingLogs({ messages: initialMessages }: ProcessingLogsProp
   // Set up polling for backend logs
   useEffect(() => {
     fetchBackendLogs();
-    const interval = setInterval(fetchBackendLogs, 5000); // Poll every 5 seconds
+    const interval = setInterval(fetchBackendLogs, 1000); // Poll every second for more responsive updates
     
     return () => clearInterval(interval);
   }, []);
@@ -77,8 +89,20 @@ export function ProcessingLogs({ messages: initialMessages }: ProcessingLogsProp
     }
     
     if (source === 'backend') {
-      icon = <Terminal className="h-4 w-4 text-blue-500 mr-2 flex-shrink-0" />;
-      badgeText = "Backend";
+      // Customize icon based on backend log content
+      if (message.toLowerCase().includes('download')) {
+        icon = <Terminal className="h-4 w-4 text-blue-500 mr-2 flex-shrink-0" />;
+        badgeText = "Download";
+      } else if (message.toLowerCase().includes('transcrib')) {
+        icon = <Terminal className="h-4 w-4 text-purple-500 mr-2 flex-shrink-0" />;
+        badgeText = "Transcribe";
+      } else if (message.toLowerCase().includes('generat') || message.toLowerCase().includes('summar')) {
+        icon = <Terminal className="h-4 w-4 text-amber-500 mr-2 flex-shrink-0" />;
+        badgeText = "Summarize";
+      } else {
+        icon = <Terminal className="h-4 w-4 text-blue-500 mr-2 flex-shrink-0" />;
+        badgeText = "Backend";
+      }
       badgeVariant = "outline";
     }
     
@@ -99,15 +123,25 @@ export function ProcessingLogs({ messages: initialMessages }: ProcessingLogsProp
   
   // Get the current processing status
   const getProcessingStatus = () => {
-    const lastMessage = messages[messages.length - 1]?.toLowerCase() || '';
+    // Check both frontend and backend logs for status
+    const lastFrontendMessage = messages[messages.length - 1]?.toLowerCase() || '';
+    const lastBackendMessage = backendLogs[backendLogs.length - 1]?.toLowerCase() || '';
     
-    if (lastMessage.includes('error') || lastMessage.includes('failed')) {
+    // First check for errors
+    if (lastFrontendMessage.includes('error') || lastFrontendMessage.includes('failed') ||
+        lastBackendMessage.includes('error') || lastBackendMessage.includes('failed')) {
       return "error";
-    } else if (lastMessage.includes('complete') || lastMessage.includes('success')) {
+    } 
+    
+    // Then check for completion
+    if ((lastFrontendMessage.includes('complete') || lastFrontendMessage.includes('success') ||
+        lastBackendMessage.includes('complete') || lastBackendMessage.includes('success')) &&
+        !lastBackendMessage.includes('progress')) {
       return "complete";
-    } else {
-      return "processing";
     }
+    
+    // Otherwise assume processing
+    return "processing";
   };
   
   const status = getProcessingStatus();
@@ -147,38 +181,36 @@ export function ProcessingLogs({ messages: initialMessages }: ProcessingLogsProp
         <Button
           variant="ghost"
           size="sm"
-          className={`text-xs rounded-none border-b-2 px-3 py-1 ${messages.length > 0 ? 'border-primary' : 'border-transparent'}`}
+          className={`text-xs rounded-none border-b-2 px-3 py-1 ${activeTab === 'frontend' ? 'border-primary' : 'border-transparent'}`}
+          onClick={() => setActiveTab('frontend')}
         >
           Frontend Logs ({messages.length})
         </Button>
         <Button
           variant="ghost"
           size="sm"
-          className={`text-xs rounded-none border-b-2 px-3 py-1 ${backendLogs.length > 0 ? 'border-blue-500' : 'border-transparent'}`}
+          className={`text-xs rounded-none border-b-2 px-3 py-1 ${activeTab === 'backend' ? 'border-blue-500' : 'border-transparent'}`}
+          onClick={() => setActiveTab('backend')}
         >
           Backend Logs ({backendLogs.length})
         </Button>
       </div>
       
-      <ScrollArea className="h-[200px] p-2 bg-card/30" ref={scrollRef}>
+      <ScrollArea className="h-[160px] p-2 bg-card/30" ref={scrollRef}>
         <div className="space-y-0.5 p-2">
-          {messages.map((message, index) => formatMessage(message, index, 'frontend'))}
-          
-          {backendLogs.length > 0 && (
-            <div className="my-2 border-t border-border/30 pt-2">
-              <div className="flex items-center mb-1">
-                <div className="h-px flex-1 bg-border/60"></div>
-                <span className="px-2 text-xs text-muted-foreground">Backend Logs</span>
-                <div className="h-px flex-1 bg-border/60"></div>
+          {activeTab === 'frontend' ? (
+            messages.length > 0 ? 
+              messages.map((message, index) => formatMessage(message, index, 'frontend')) :
+              <div className="flex items-center justify-center h-[120px] text-muted-foreground">
+                No frontend logs yet.
               </div>
-              {backendLogs.map((message, index) => formatMessage(message, index, 'backend'))}
-            </div>
-          )}
-          
-          {messages.length === 0 && backendLogs.length === 0 && (
-            <div className="flex items-center justify-center h-[150px] text-muted-foreground">
-              No processing logs yet.
-            </div>
+          ) : (
+            backendLogs.length > 0 ?
+              backendLogs.map((message, index) => formatMessage(message, index, 'backend')) :
+              <div className="flex items-center justify-center h-[120px] text-muted-foreground">
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Waiting for backend logs...
+              </div>
           )}
         </div>
       </ScrollArea>

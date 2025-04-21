@@ -51,7 +51,7 @@ export function LanguageSelector() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
-        className="backdrop-blur-xl bg-black/30 p-6 rounded-xl border border-white/10 shadow-xl"
+        className="backdrop-blur-xl dark:bg-black/30 bg-white border border-border dark:border-white/10 shadow-xl p-6 rounded-xl"
       >
         <div className="flex items-center gap-3 mb-4">
           <motion.div 
@@ -62,12 +62,12 @@ export function LanguageSelector() {
           >
             <Languages className="h-5 w-5 text-indigo-400" />
           </motion.div>
-          <span className="text-lg font-semibold text-white">Translation Language</span>
+          <span className="text-lg font-semibold text-foreground dark:text-white">Translation Language</span>
         </div>
         
         <Select value={selectedLanguage} onValueChange={handleLanguageChange}>
           <SelectTrigger 
-            className="w-full bg-black/40 border-white/10 text-white backdrop-blur-md transition-all hover:bg-black/60 focus:ring-indigo-500/50"
+            className="w-full dark:bg-black/40 bg-white/80 border-border dark:border-white/10 text-foreground dark:text-white backdrop-blur-md transition-all hover:bg-muted dark:hover:bg-black/60 focus:ring-primary/50"
             onClick={() => setIsOpen(!isOpen)}
           >
             <SelectValue>
@@ -78,7 +78,7 @@ export function LanguageSelector() {
             </SelectValue>
           </SelectTrigger>
           
-          <SelectContent className="bg-black/80 backdrop-blur-xl border-white/10 text-white">
+          <SelectContent className="dark:bg-black/80 bg-white backdrop-blur-xl border-border dark:border-white/10 text-foreground dark:text-white">
             <SelectGroup>
               {languages.map((language) => (
                 <SelectItem 
@@ -101,7 +101,7 @@ export function LanguageSelector() {
           </SelectContent>
         </Select>
         
-        <p className="text-white/60 text-sm mt-4">
+        <p className="text-muted-foreground dark:text-white/60 text-sm mt-4">
           Choose the language for your summaries and analysis
         </p>
         
@@ -112,7 +112,7 @@ export function LanguageSelector() {
         >
           <a 
             href="#demo" 
-            className="flex items-center gap-2 text-indigo-400 hover:text-indigo-300 transition-colors group"
+            className="flex items-center gap-2 text-primary dark:text-indigo-400 hover:text-primary/80 dark:hover:text-indigo-300 transition-colors group"
           >
             <span>Try it now</span>
             <motion.div

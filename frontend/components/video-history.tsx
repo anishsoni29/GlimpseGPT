@@ -182,7 +182,7 @@ export function VideoHistory() {
                   scale: 1.02, 
                   boxShadow: "0 4px 12px rgba(0,0,0,0.05)" 
                 }}
-                className="flex gap-3 p-2 rounded-lg hover:bg-accent/50 transition-colors group"
+                className="flex gap-3 p-2 rounded-lg hover:bg-accent/50 transition-colors group relative"
               >
                 <motion.div 
                   className="relative w-24 h-16 rounded-md overflow-hidden flex-shrink-0 cursor-pointer group"
@@ -208,12 +208,16 @@ export function VideoHistory() {
                 </motion.div>
                 
                 <div className="flex-1 min-w-0">
-                  <h4 className="font-medium text-sm truncate">{item.title}</h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-medium text-sm truncate pr-2">{item.title}</h4>
+                  </div>
+                  
                   <p className="text-xs text-muted-foreground">
                     {new Date(item.timestamp).toLocaleDateString()}
                   </p>
+                  
                   <motion.div 
-                    className="mt-1 flex gap-2"
+                    className="mt-1 flex items-center gap-2"
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 * index + 0.3 }}
@@ -231,24 +235,24 @@ export function VideoHistory() {
                         Reprocess
                       </Button>
                     </motion.div>
+                    
+                    <motion.div
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      className="flex items-center"
+                    >
+                      <Button
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-7 w-7 rounded-full hover:bg-destructive/10"
+                        onClick={() => removeFromHistory(item.id)}
+                        title="Remove from history"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                      </Button>
+                    </motion.div>
                   </motion.div>
                 </div>
-                
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 0 }}
-                  whileHover={{ opacity: 1, rotate: [0, -5, 5, 0] }}
-                  transition={{ duration: 0.3 }}
-                >
-                  <Button
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8"
-                    onClick={() => removeFromHistory(item.id)}
-                  >
-                    <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-                  </Button>
-                </motion.div>
               </motion.div>
             ))}
           </motion.div>

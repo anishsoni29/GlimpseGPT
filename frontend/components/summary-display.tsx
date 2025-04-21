@@ -24,7 +24,10 @@ import {
   AlertCircle,
   Headphones,
   X as Close,
-  Speaker
+  Speaker,
+  Info,
+  CheckCircle,
+  Loader2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
@@ -34,6 +37,7 @@ import { Slider } from "@/components/ui/slider";
 import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ProcessingLogs } from "@/components/processing-logs";
 
 // Type definition for the summary data
 interface SummaryData {
@@ -54,10 +58,15 @@ interface SummaryData {
   }[];
 }
 
+// Props definition for SummaryDisplay
+interface SummaryDisplayProps {
+  logMessages?: string[];
+}
+
 // Add a utility to check if speech synthesis is available
 const isSpeechSynthesisSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
 
-export function SummaryDisplay() {
+export function SummaryDisplay({ logMessages = [] }: SummaryDisplayProps) {
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isTranscriptPlaying, setIsTranscriptPlaying] = useState(false);
@@ -1088,8 +1097,41 @@ export function SummaryDisplay() {
                 </TabsList>
               </div>
               
-              <TabsContent value="summary" className="m-0 h-[calc(100vh-250px)] relative pb-14">
-                <div className="prose dark:prose-invert max-w-none text-foreground px-6 pt-6 overflow-y-auto h-full">
+              <TabsContent value="summary" className="m-0 h-[calc(100vh-350px)] relative pb-6">
+                {/* Action buttons - moved to top */}
+                <div className="border-b border-border/30 bg-background py-3 px-6 flex items-center gap-4">
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={handlePlayPause}
+                    className="flex items-center gap-2 text-sm h-9"
+                  >
+                    <Play className="h-4 w-4" />
+                    Listen
+                  </Button>
+                      
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => copyToClipboard(summaryData?.summary_translated || "")}
+                    className="flex items-center gap-2 text-sm h-9"
+                  >
+                    <Copy className="h-4 w-4" />
+                    Copy
+                  </Button>
+                    
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={downloadSummary}
+                    className="flex items-center gap-2 text-sm h-9"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download
+                  </Button>
+                </div>
+                
+                <div className="prose dark:prose-invert max-w-none text-foreground px-6 pt-6 overflow-y-auto h-[calc(100%-90px)]">
                   {summaryData?.summary_translated ? (
                     summaryData.summary_translated.split('\n').map((paragraph, index) => (
                       <p key={index} className={`${index > 0 ? "mt-4" : ""} text-foreground`}>
@@ -1100,43 +1142,42 @@ export function SummaryDisplay() {
                     <p className="text-foreground">This is a sample translated summary.</p>
                   )}
                 </div>
-                
-                {/* Action buttons */}
-                <div className="absolute bottom-0 left-0 right-0 border-t border-border/30 bg-background py-3 px-6 flex items-center gap-4">
-                      <Button 
-                        variant="outline" 
+              </TabsContent>
+              
+              <TabsContent value="transcript" className="m-0 h-[calc(100vh-350px)] relative pb-6">
+                {/* Action buttons - moved to top */}
+                <div className="border-b border-border/30 bg-background py-3 px-6 flex items-center gap-4">
+                  <Button 
+                    variant="outline" 
                     size="sm"
-                    onClick={handlePlayPause}
+                    onClick={toggleTranscriptAudio}
                     className="flex items-center gap-2 text-sm h-9"
                   >
-                    <Play className="h-4 w-4" />
-                            Listen
-                      </Button>
-                      
-                      <Button 
-                        variant="outline" 
+                    {isTranscriptPlaying ? (
+                      <>
+                        <Pause className="h-4 w-4" />
+                        Pause
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-4 w-4" />
+                        Listen
+                      </>
+                    )}
+                  </Button>
+                
+                  <Button 
+                    variant="outline" 
                     size="sm"
-                    onClick={() => copyToClipboard(summaryData.summary_translated || "")}
+                    onClick={() => copyToClipboard(summaryData?.original_text || "")}
                     className="flex items-center gap-2 text-sm h-9"
-                      >
+                  >
                     <Copy className="h-4 w-4" />
                     Copy
-                      </Button>
-                    
-                    <Button 
-                      variant="outline" 
-                    size="sm"
-                    onClick={downloadSummary}
-                    className="flex items-center gap-2 text-sm h-9"
-                    >
-                    <Download className="h-4 w-4" />
-                    Download
-                    </Button>
-                  </div>
-                </TabsContent>
-              
-              <TabsContent value="transcript" className="m-0 h-[calc(100vh-250px)] relative pb-14">
-                <div className="prose dark:prose-invert max-w-none text-foreground px-6 pt-6 overflow-y-auto h-full">
+                  </Button>
+                </div>
+                
+                <div className="prose dark:prose-invert max-w-none text-foreground px-6 pt-6 overflow-y-auto h-[calc(100%-90px)]">
                   {summaryData?.transcript_segments && summaryData.transcript_segments.length > 0 ? (
                     <div className="space-y-4">
                       {summaryData.transcript_segments.map((segment, index) => (
@@ -1146,50 +1187,26 @@ export function SummaryDisplay() {
                               {formatTimestamp(segment.start)}
                             </span>
                             <div className="h-px flex-1 bg-border/40"></div>
-                      </div>
-                          <p className="pl-2 border-l-2 border-primary/20 text-foreground">{segment.text}</p>
+                          </div>
+                          <p className="text-foreground">{segment.text}</p>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div>
-                      {summaryData?.original_text ? summaryData.original_text.split('\n').map((paragraph, index) => (
-                        <p key={index} className={index > 0 ? "mt-4" : ""}>
-                          {paragraph}
-                        </p>
-                      )) : (
-                        <p className="text-foreground">No transcript available.</p>
-                      )}
-                    </div>
+                    <p className="text-foreground">No transcript available for this video.</p>
                   )}
                 </div>
-                
-                {/* Action buttons */}
-                <div className="absolute bottom-0 left-0 right-0 border-t border-border/30 bg-background py-3 px-6 flex items-center gap-4">
-                        <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={toggleTranscriptAudio}
-                    className="flex items-center gap-2 text-sm h-9"
-                        >
-                    <Play className="h-4 w-4" />
-                    Listen
-                        </Button>
-                  
-                        <Button 
-                    variant="outline"
-                    size="sm"
-                    onClick={() => copyToClipboard(summaryData.original_text || "")}
-                    className="flex items-center gap-2 text-sm h-9"
-                  >
-                    <Copy className="h-4 w-4" />
-                    Copy
-                        </Button>
-                        </div>
               </TabsContent>
             </Tabs>
-                        </div>
-              )}
+            
+            {/* Place processing logs below the tabs */}
+            {logMessages.length > 0 && (
+              <div className="mt-4 mb-4 px-4">
+                <ProcessingLogs messages={logMessages} />
+              </div>
+            )}
+          </div>
+        )}
       </Card>
     </div>
   );

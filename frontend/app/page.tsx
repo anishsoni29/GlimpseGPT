@@ -184,12 +184,7 @@ export default function Home() {
               </div>
             )}
             
-            <SummaryDisplay />
-            
-            {/* Processing Logs */}
-            {logMessages.length > 0 && (
-              <ProcessingLogs messages={logMessages} />
-            )}
+            <SummaryDisplay logMessages={logMessages} />
           </div>
         </div>
       </section>
