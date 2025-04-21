@@ -3,7 +3,7 @@ import base64
 import logging
 import re
 import json
-from typing import Optional, Union, Dict, Any
+from typing import Optional, Union, Dict, Any, List
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,6 +20,8 @@ from main import (
     language_code_map
 )
 import yt_dlp
+from io import StringIO, BytesIO
+from datetime import datetime
 
 # Set up logging
 logging.basicConfig(
@@ -42,6 +44,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Set up logging with a custom handler that stores recent logs
+class MemoryLogHandler(logging.Handler):
+    def __init__(self, capacity=100):
+        super().__init__()
+        self.capacity = capacity
+        self.logs = []
+        self.formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    def emit(self, record):
+        log_entry = self.formatter.format(record)
+        self.logs.append(log_entry)
+        # Keep only the most recent logs
+        if len(self.logs) > self.capacity:
+            self.logs.pop(0)
+
+# Create memory handler
+memory_handler = MemoryLogHandler()
+memory_handler.setLevel(logging.INFO)
+
+# Add it to the root logger
+logging.getLogger().addHandler(memory_handler)
+
+# Add it to our logger
+logger.addHandler(memory_handler)
+
+# Now all log messages will be stored in memory_handler.logs
 
 # Validate YouTube URL and extract ID
 def validate_youtube_url(url: str) -> str:
@@ -346,6 +375,17 @@ async def global_exception_handler(request, exc):
         status_code=500,
         content={"detail": f"Server error: {str(exc)}"},
     )
+
+@app.get("/api/logs")
+async def get_logs():
+    """
+    Return the most recent logs from the application.
+    """
+    try:
+        return {"logs": memory_handler.logs}
+    except Exception as e:
+        logger.error(f"Error retrieving logs: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve logs: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

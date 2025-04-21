@@ -1,27 +1,62 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/ui/card';
-import { Loader2, AlertCircle, CheckCircle, Info } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle, Info, Terminal, RefreshCw } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 interface ProcessingLogsProps {
   messages: string[];
 }
 
-export function ProcessingLogs({ messages }: ProcessingLogsProps) {
+export function ProcessingLogs({ messages: initialMessages }: ProcessingLogsProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [messages, setMessages] = useState<string[]>(initialMessages);
+  const [backendLogs, setBackendLogs] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   
   useEffect(() => {
     // Auto-scroll to bottom on new messages
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, backendLogs]);
+
+  // Update local messages when props change
+  useEffect(() => {
+    setMessages(initialMessages);
+  }, [initialMessages]);
+
+  // Function to fetch logs from backend
+  const fetchBackendLogs = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch('/api/logs');
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data.logs)) {
+          setBackendLogs(data.logs);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch backend logs:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Set up polling for backend logs
+  useEffect(() => {
+    fetchBackendLogs();
+    const interval = setInterval(fetchBackendLogs, 5000); // Poll every 5 seconds
+    
+    return () => clearInterval(interval);
+  }, []);
 
   // Function to format log messages with appropriate icons and styles
-  const formatMessage = (message: string, index: number) => {
+  const formatMessage = (message: string, index: number, source: 'frontend' | 'backend') => {
     let icon = <Info className="h-4 w-4 text-primary mr-2 flex-shrink-0" />;
     let badgeText = "Info";
     let badgeVariant = "default";
@@ -41,8 +76,14 @@ export function ProcessingLogs({ messages }: ProcessingLogsProps) {
       badgeVariant = "secondary";
     }
     
+    if (source === 'backend') {
+      icon = <Terminal className="h-4 w-4 text-blue-500 mr-2 flex-shrink-0" />;
+      badgeText = "Backend";
+      badgeVariant = "outline";
+    }
+    
     return (
-      <div key={index} className="flex items-start py-1.5 border-b border-border/50 last:border-0 group">
+      <div key={`${source}-${index}`} className="flex items-start py-1.5 border-b border-border/50 last:border-0 group hover:bg-muted/30 px-2 rounded transition-colors">
         <div className="flex items-center mr-2">
           {icon}
         </div>
@@ -72,29 +113,69 @@ export function ProcessingLogs({ messages }: ProcessingLogsProps) {
   const status = getProcessingStatus();
   
   return (
-    <Card className="border overflow-hidden">
-      <div className="bg-muted/40 p-3 border-b flex items-center justify-between">
+    <Card className="border border-border/40 overflow-hidden shadow-md rounded-xl">
+      <div className="bg-muted/40 p-3 border-b border-border/30 flex items-center justify-between">
         <div className="font-medium text-sm flex items-center">
           {status === "processing" && <Loader2 className="h-4 w-4 mr-2 animate-spin text-primary" />}
           {status === "error" && <AlertCircle className="h-4 w-4 mr-2 text-destructive" />}
           {status === "complete" && <CheckCircle className="h-4 w-4 mr-2 text-green-500" />}
           Processing Logs
         </div>
-        <Badge variant={
-          status === "processing" ? "secondary" : 
-          status === "error" ? "destructive" : 
-          "success"
-        }>
-          {status === "processing" ? "Processing" : 
-           status === "error" ? "Error" : 
-           "Complete"}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Button 
+            size="icon" 
+            variant="outline" 
+            className="h-7 w-7 border border-border/40" 
+            onClick={fetchBackendLogs}
+            disabled={isLoading}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+          </Button>
+          <Badge variant={
+            status === "processing" ? "secondary" : 
+            status === "error" ? "destructive" : 
+            "success"
+          }>
+            {status === "processing" ? "Processing" : 
+             status === "error" ? "Error" : 
+             "Complete"}
+          </Badge>
+        </div>
       </div>
-      <ScrollArea className="h-[200px] p-2" ref={scrollRef}>
+      
+      <div className="flex px-3 py-1.5 border-b border-border/30">
+        <Button
+          variant="ghost"
+          size="sm"
+          className={`text-xs rounded-none border-b-2 px-3 py-1 ${messages.length > 0 ? 'border-primary' : 'border-transparent'}`}
+        >
+          Frontend Logs ({messages.length})
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={`text-xs rounded-none border-b-2 px-3 py-1 ${backendLogs.length > 0 ? 'border-blue-500' : 'border-transparent'}`}
+        >
+          Backend Logs ({backendLogs.length})
+        </Button>
+      </div>
+      
+      <ScrollArea className="h-[200px] p-2 bg-card/30" ref={scrollRef}>
         <div className="space-y-0.5 p-2">
-          {messages.map((message, index) => formatMessage(message, index))}
+          {messages.map((message, index) => formatMessage(message, index, 'frontend'))}
           
-          {messages.length === 0 && (
+          {backendLogs.length > 0 && (
+            <div className="my-2 border-t border-border/30 pt-2">
+              <div className="flex items-center mb-1">
+                <div className="h-px flex-1 bg-border/60"></div>
+                <span className="px-2 text-xs text-muted-foreground">Backend Logs</span>
+                <div className="h-px flex-1 bg-border/60"></div>
+              </div>
+              {backendLogs.map((message, index) => formatMessage(message, index, 'backend'))}
+            </div>
+          )}
+          
+          {messages.length === 0 && backendLogs.length === 0 && (
             <div className="flex items-center justify-center h-[150px] text-muted-foreground">
               No processing logs yet.
             </div>

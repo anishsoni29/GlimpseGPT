@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Clock, Trash2, PlayCircle } from 'lucide-react';
+import { Clock, Trash2, PlayCircle, ExternalLink } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { motion } from 'framer-motion';
@@ -93,6 +93,12 @@ export function VideoHistory() {
     });
   };
 
+  const handleOpenYoutubeVideo = (url: string) => {
+    if (url && url.includes('youtube.com') || url.includes('youtu.be')) {
+      window.open(url, '_blank');
+    }
+  };
+
   if (history.length === 0) {
     return (
       <Card className="p-6 bg-card">
@@ -179,15 +185,21 @@ export function VideoHistory() {
                 className="flex gap-3 p-2 rounded-lg hover:bg-accent/50 transition-colors group"
               >
                 <motion.div 
-                  className="relative w-24 h-16 rounded-md overflow-hidden flex-shrink-0"
+                  className="relative w-24 h-16 rounded-md overflow-hidden flex-shrink-0 cursor-pointer group"
                   whileHover={{ scale: 1.05 }}
+                  onClick={() => handleOpenYoutubeVideo(item.url)}
                 >
                   {item.thumbnailUrl ? (
-                    <img 
-                      src={item.thumbnailUrl} 
-                      alt={item.title} 
-                      className="object-cover w-full h-full"
-                    />
+                    <>
+                      <img 
+                        src={item.thumbnailUrl} 
+                        alt={item.title} 
+                        className="object-cover w-full h-full"
+                      />
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <ExternalLink className="h-5 w-5 text-white" />
+                      </div>
+                    </>
                   ) : (
                     <div className="bg-muted w-full h-full flex items-center justify-center">
                       <PlayCircle className="h-6 w-6 text-muted-foreground" />
