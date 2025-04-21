@@ -7,6 +7,8 @@ import { Clock, Trash2, PlayCircle, ExternalLink } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { motion } from 'framer-motion';
+import { supabase, getVideoHistory, removeVideoFromHistory, clearVideoHistory } from '../../backend/lib/supabase';
+import { useAuth } from '@/lib/auth-context';
 
 interface HistoryItem {
   id: string;
@@ -15,22 +17,51 @@ interface HistoryItem {
   url: string;
   timestamp: number;
   language: string;
+  user_id: string; // Added for Supabase
 }
 
 export function VideoHistory() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const { toast } = useToast();
+  const { user } = useAuth();
+  const userId = user?.id || 'anonymous';
 
   useEffect(() => {
-    // Load history from localStorage
-    const loadHistory = () => {
+    // Load history from Supabase or localStorage
+    const loadHistory = async () => {
+      if (userId !== 'anonymous') {
+        // Authenticated user - load from Supabase
+        const { data, error } = await getVideoHistory(userId);
+        
+        if (error) {
+          console.error('Failed to fetch video history', error);
+          // Fall back to localStorage if Supabase fails
+          loadFromLocalStorage();
+          return;
+        }
+        
+        if (data && data.length > 0) {
+          setHistory(data);
+        } else {
+          // No data in Supabase, try localStorage
+          loadFromLocalStorage();
+        }
+      } else {
+        // Non-authenticated user - load from localStorage
+        loadFromLocalStorage();
+      }
+    };
+    
+    const loadFromLocalStorage = () => {
       const savedHistory = localStorage.getItem('videoHistory');
       if (savedHistory) {
         try {
           const parsedHistory = JSON.parse(savedHistory);
-          setHistory(Array.isArray(parsedHistory) ? parsedHistory : []);
+          if (Array.isArray(parsedHistory) && parsedHistory.length > 0) {
+            setHistory(parsedHistory);
+          }
         } catch (error) {
-          console.error('Failed to parse video history', error);
+          console.error('Failed to parse video history from localStorage', error);
         }
       }
     };
@@ -38,26 +69,17 @@ export function VideoHistory() {
     // Initial load
     loadHistory();
     
-    // Listen for storage events
-    const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === 'videoHistory') {
-        loadHistory();
-      }
-    };
-    
     // Listen for custom event for immediate refresh
     const handleHistoryUpdated = () => {
       loadHistory();
     };
     
-    window.addEventListener('storage', handleStorageChange);
     window.addEventListener('videoHistoryUpdated', handleHistoryUpdated);
     
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('videoHistoryUpdated', handleHistoryUpdated);
     };
-  }, []);
+  }, [userId]);
 
   const handleReprocess = (item: HistoryItem) => {
     // Create and dispatch a custom event to trigger reprocessing in the VideoUpload component
@@ -72,10 +94,19 @@ export function VideoHistory() {
     });
   };
 
-  const removeFromHistory = (id: string) => {
-    const updatedHistory = history.filter(item => item.id !== id);
-    setHistory(updatedHistory);
-    localStorage.setItem('videoHistory', JSON.stringify(updatedHistory));
+  const removeFromHistory = async (id: string) => {
+    const { error } = await removeVideoFromHistory(id);
+    
+    if (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to remove video from history',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    setHistory(history.filter(item => item.id !== id));
     
     toast({
       title: 'Removed from History',
@@ -83,9 +114,19 @@ export function VideoHistory() {
     });
   };
 
-  const clearHistory = () => {
+  const clearHistory = async () => {
+    const { error } = await clearVideoHistory(userId);
+    
+    if (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to clear history',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
     setHistory([]);
-    localStorage.removeItem('videoHistory');
     
     toast({
       title: 'History Cleared',
@@ -260,4 +301,4 @@ export function VideoHistory() {
       </Card>
     </motion.div>
   );
-} 
+}

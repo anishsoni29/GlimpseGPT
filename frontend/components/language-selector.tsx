@@ -16,6 +16,8 @@ import {
   SelectValue 
 } from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
+import { getUserPreferences, saveUserPreferences } from "../../backend/lib/supabase";
+import { useAuth } from "@/lib/auth-context";
 
 const languages = [
   { code: "English", name: "English", flag: "🇺🇸" },
@@ -27,18 +29,60 @@ const languages = [
 export function LanguageSelector() {
   const [selectedLanguage, setSelectedLanguage] = useState("English");
   const [isOpen, setIsOpen] = useState(false);
+  const { user } = useAuth();
+  const userId = user?.id || 'anonymous';
 
   // Load saved language preference on mount
   useEffect(() => {
-    const savedLanguage = localStorage.getItem('preferredLanguage');
-    if (savedLanguage) {
-      setSelectedLanguage(savedLanguage);
-    }
-  }, []);
+    const loadLanguagePreference = async () => {
+      // Try to get from Supabase only if user is authenticated
+      if (user) {
+        const { data, error } = await getUserPreferences(userId);
+        
+        if (error) {
+          console.error('Failed to load language preference from database', error);
+          // Fall back to localStorage
+          const savedLanguage = localStorage.getItem('preferredLanguage');
+          if (savedLanguage) {
+            setSelectedLanguage(savedLanguage);
+          }
+          return;
+        }
+        
+        if (data && data.preferred_language) {
+          setSelectedLanguage(data.preferred_language);
+        }
+      } else {
+        // For non-authenticated users, use localStorage
+        const savedLanguage = localStorage.getItem('preferredLanguage');
+        if (savedLanguage) {
+          setSelectedLanguage(savedLanguage);
+        }
+      }
+    };
+    
+    loadLanguagePreference();
+  }, [userId, user]);
 
   // Handle language change
-  const handleLanguageChange = (value: string) => {
+  const handleLanguageChange = async (value: string) => {
     setSelectedLanguage(value);
+    
+    // Save to Supabase only if user is authenticated
+    if (user) {
+      const preferenceData = {
+        user_id: userId,
+        preferred_language: value
+      };
+      
+      const { error } = await saveUserPreferences(preferenceData);
+      
+      if (error) {
+        console.error('Failed to save language preference to database', error);
+      }
+    }
+    
+    // Always save to localStorage as fallback
     localStorage.setItem('preferredLanguage', value);
     
     // Notify other components about the language change

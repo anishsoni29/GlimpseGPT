@@ -38,6 +38,8 @@ import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ProcessingLogs } from "@/components/processing-logs";
+import { getSummary } from "../../backend/lib/supabase";
+import { useAuth } from "@/lib/auth-context";
 
 // Type definition for the summary data
 interface SummaryData {
@@ -83,6 +85,7 @@ export function SummaryDisplay({ logMessages = [] }: SummaryDisplayProps) {
   const [voicesLoaded, setVoicesLoaded] = useState(false);
   
   const { toast } = useToast();
+  const { user } = useAuth();
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const speechSynthesisRef = useRef<typeof window.speechSynthesis | null>(null);
@@ -548,61 +551,62 @@ export function SummaryDisplay({ logMessages = [] }: SummaryDisplayProps) {
 
   // Function to handle summary data loading and debugging
   useEffect(() => {
-    const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === 'summaryData' && event.newValue) {
-        try {
-          const parsedData = JSON.parse(event.newValue);
-          setSummaryData(parsedData);
-          
-          // Debug log for troubleshooting summary display issues
-          console.log("[Debug] Summary Data Loaded:", {
-            hasSummaryEn: !!parsedData?.summary_en,
-            summaryEnLength: parsedData?.summary_en?.length || 0,
-            hasSummaryTranslated: !!parsedData?.summary_translated,
-            summaryTranslatedLength: parsedData?.summary_translated?.length || 0,
-            hasOriginalText: !!parsedData?.original_text,
-            hasSegments: Array.isArray(parsedData?.transcript_segments) && parsedData?.transcript_segments.length > 0,
-            segmentsCount: parsedData?.transcript_segments?.length || 0
-          });
-          
-          // Add a visible error to trigger if summary is missing but metadata is present
-          if (parsedData?.thumbnail_url && (!parsedData?.summary_translated || parsedData.summary_translated.trim() === '')) {
-            console.error("[Error] Thumbnail exists but summary is missing");
-            // Dispatch a custom event for the processing logs
-            window.dispatchEvent(new CustomEvent('processingLog', { 
-              detail: "Error: Thumbnail loaded but summary is missing. Check API response." 
-            }));
-          }
-        } catch (e) {
-          console.error('Failed to parse summary data', e);
-        }
-      }
-    };
-    
     // Custom event handler 
     const handleCustomEvent = (event: CustomEvent<SummaryData>) => {
       if (event.detail) setSummaryData(event.detail);
     };
-    
-    window.addEventListener('storage', handleStorageChange);
+
     window.addEventListener('summaryUpdated', handleCustomEvent as EventListener);
     
-    // Load existing data from localStorage
-    const savedData = localStorage.getItem('summaryData');
-    if (savedData) {
-      try {
-        setSummaryData(JSON.parse(savedData));
-      } catch (e) {
-        console.error('Failed to parse saved summary data', e);
+    // Load existing data from Supabase
+    const loadSummaryData = async () => {
+      // We need to get the current video ID, which would typically be from app state
+      // For this example, we'll assume it's available from URL or state management
+      const videoId = window.location.hash.substring(1) || 'current';
+      
+      // Only try to load from Supabase if the user is authenticated
+      if (user) {
+        const { data, error } = await getSummary(videoId);
+        
+        if (error) {
+          console.error('Failed to load summary from database', error);
+          return;
+        }
+        
+        if (data) {
+          setSummaryData(data);
+          
+          // Debug log for troubleshooting summary display issues
+          console.log("[Debug] Summary Data Loaded from Supabase:", {
+            hasSummaryEn: !!data?.summary_en,
+            summaryEnLength: data?.summary_en?.length || 0,
+            hasSummaryTranslated: !!data?.summary_translated,
+            summaryTranslatedLength: data?.summary_translated?.length || 0,
+            hasOriginalText: !!data?.original_text,
+            hasSegments: Array.isArray(data?.transcript_segments) && data?.transcript_segments.length > 0,
+            segmentsCount: data?.transcript_segments?.length || 0
+          });
+        }
+      } else {
+        // For non-authenticated users, try localStorage
+        const savedData = localStorage.getItem('summaryData');
+        if (savedData) {
+          try {
+            setSummaryData(JSON.parse(savedData));
+          } catch (e) {
+            console.error('Failed to parse saved summary data', e);
+          }
+        }
       }
-    }
+    };
+    
+    loadSummaryData();
     
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('summaryUpdated', handleCustomEvent as EventListener);
       if (isPlaying || isTranscriptPlaying) window.speechSynthesis.cancel();
     };
-  }, [isPlaying, isTranscriptPlaying]);
+  }, [isPlaying, isTranscriptPlaying, user]);
 
   // Format time for display
   const formatTime = (seconds: number) => {
