@@ -1,79 +1,44 @@
-# GlimpseGPT
-
-A powerful video and audio summarization tool with sentiment analysis and multilingual capabilities.
+# GlimpseGPT - AI-Powered Video Understanding Platform
 
 ## Features
+- YouTube video processing and analysis
+- Multilingual transcription & translation (English, Hindi, Tamil, Marathi)
+- AI-generated summaries and insights
+- Sentiment analysis
+- User authentication with Supabase
+- Video history tracking
 
-- Extract audio from YouTube videos or upload your own audio/video files
-- Transcribe audio to text
-- Summarize text content
-- Translate summaries to multiple languages
-- Analyze sentiment in the text
-- Text-to-speech functionality
+## Tech Stack
 
-## Project Structure
+### Frontend
+- **Framework**: Next.js 14 (App Router)
+- **UI**: Shadcn UI, Radix UI, Tailwind CSS
+- **Animation**: Framer Motion
+- **State Management**: React Hook Form, react-hook-form
 
-- `backend/`: Python FastAPI backend with ML models and processing logic
-- `frontend/`: Next.js frontend with a clean UI for user interaction
+### Backend
+- **Database**: Supabase (PostgreSQL)
+- **AI Models**:
+  - OpenAI Whisper Large-v3 (Audio Transcription)
+  - Facebook BART-large-cnn (Summarization)
+  - Helsinki-NLP MarianMT (en-mul for translation)
+  - CardiffNLP Twitter-RoBERTa (Sentiment Analysis)
+- **Core Libraries**:
+  - PyTorch 2.0.1
+  - Transformers 4.31.0
+  - Sentencepiece 0.1.99 (Tokenization)
 
-## Setup Instructions
+### Deployment
+- Vercel (Frontend)
+- Docker (AI services)
 
-### Backend Setup
+## Installation
 
-1. Navigate to the backend directory:
-   ```
-   cd backend
-   ```
+```bash
+# Clone repository
+git clone https://github.com/yourusername/glimpsegpt.git
 
-2. Create a virtual environment:
-   ```
-   python -m venv venv
-   ```
-
-3. Activate the virtual environment:
-   - On Windows: `venv\Scripts\activate`
-   - On macOS/Linux: `source venv/bin/activate`
-
-4. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-
-5. Run the FastAPI server:
-   ```
-   uvicorn api:app --reload
-   ```
-
-The backend will be available at http://localhost:8000
-
-### Frontend Setup
-
-1. Navigate to the frontend directory:
-   ```
-   cd frontend
-   ```
-
-2. Install dependencies:
-   ```
-   npm install
-   ```
-
-3. Run the development server:
-   ```
-   npm run dev
-   ```
-
-The frontend will be available at http://localhost:3000
-
-## Usage
-
-1. Open your browser and go to http://localhost:3000
-2. Enter a YouTube URL or upload an audio/video file
-3. Select your preferred summary language
-4. Click "Process" to generate a summary
-5. View the summary, transcript, and sentiment analysis results
-6. Use the built-in text-to-speech to listen to the summary
-
-## License
-
-MIT 
+# Install dependencies
+cd frontend && npm install
+cd ../backend && pip install -r requirements.txt
+```
