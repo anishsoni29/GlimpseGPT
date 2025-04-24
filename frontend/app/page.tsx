@@ -9,16 +9,48 @@ import { Github } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { ProcessingLogs } from '@/components/processing-logs';
+import { NavBar } from '@/components/nav-bar';
 
 export default function Home() {
   const [showProcessor, setShowProcessor] = useState(false);
   const [logMessages, setLogMessages] = useState<string[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingError, setProcessingError] = useState<string | null>(null);
 
   // Listen for processing logs
   useEffect(() => {
     const handleProcessingLog = (event: CustomEvent<string>) => {
       if (event.detail) {
-        setLogMessages(prev => [...prev, event.detail].slice(-50)); // Keep last 50 messages
+        const newMessage = event.detail;
+        let logType: 'info' | 'error' | 'warning' | 'success' = 'info';
+        
+        // Determine log type based on message content
+        if (newMessage.toLowerCase().includes('error') || newMessage.toLowerCase().includes('failed')) {
+          logType = 'error';
+        } else if (newMessage.toLowerCase().includes('warning')) {
+          logType = 'warning';
+        } else if (newMessage.toLowerCase().includes('complete') || newMessage.toLowerCase().includes('success')) {
+          logType = 'success';
+        }
+        
+        setLogMessages(prev => [...prev, newMessage].slice(-50)); // Keep last 50 messages
+        
+        // Update processing status based on log messages
+        if (newMessage.toLowerCase().includes('start') || 
+            newMessage.toLowerCase().includes('downloading') ||
+            newMessage.toLowerCase().includes('processing')) {
+          setIsProcessing(true);
+          setProcessingError(null);
+        }
+        
+        if (newMessage.toLowerCase().includes('complete')) {
+          setIsProcessing(false);
+        }
+        
+        if (logType === 'error') {
+          setIsProcessing(false);
+          setProcessingError(newMessage);
+        }
       }
     };
     
@@ -52,59 +84,9 @@ export default function Home() {
 
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
-      {/* Header */}
-      <header className="border-b border-border/40 bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-14 max-w-screen-2xl items-center">
-          <div className="flex items-center gap-2 font-bold mr-4">
-            <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="size-5 text-primary"
-              >
-                <path d="m15 5 4 4" />
-                <path d="M14.5 5.5 18 2" />
-                <path d="M10 2v4" />
-                <path d="M7 8 3 4" />
-                <path d="M7 14 3 18" />
-                <path d="m3 4 18 14" />
-              </svg>
-            </div>
-            <span className="font-semibold text-xl">GlimpseGPT</span>
-          </div>
-          
-          <nav className="hidden md:flex flex-1 items-center gap-4 md:gap-6 text-sm">
-            <a
-              href="#features"
-              className="transition-colors hover:text-primary font-medium"
-            >
-              Features
-            </a>
-            <a
-              href="#demo"
-              className="transition-colors hover:text-primary font-medium"
-            >
-              Try it
-            </a>
-          </nav>
-
-          <div className="flex-1 md:flex-none flex items-center justify-end gap-2">
-            <a href="https://github.com/yourusername/glimpsegpt" target="_blank" rel="noreferrer">
-              <Button variant="ghost" size="icon">
-                <Github className="h-5 w-5" />
-                <span className="sr-only">GitHub</span>
-              </Button>
-            </a>
-            <ThemeToggle />
-          </div>
-        </div>
-      </header>
-
+      {/* NavBar */}
+      <NavBar />
+      
       {/* Hero Section */}
       <section className="py-8 md:py-12 lg:py-16 bg-background relative overflow-hidden">
         <div className="absolute inset-0 bg-grid-pattern opacity-[0.02] pointer-events-none dark:opacity-[0.04]" />
@@ -145,12 +127,25 @@ export default function Home() {
           
           {/* Center/Right Column: Summary Display */}
           <div className="md:col-span-7 lg:col-span-8 xl:col-span-9 space-y-6">
-            <SummaryDisplay />
-            
-            {/* Processing Logs */}
-            {showProcessor && (
-              <ProcessingLogs messages={logMessages} />
+            {processingError && !isProcessing && (
+              <div className="w-full bg-destructive/5 border border-destructive/20 rounded-lg p-4 mb-4">
+                <div className="flex items-center">
+                  <div className="mr-3 text-destructive">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-destructive text-sm">Processing Error</h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {processingError}
+                    </p>
+                  </div>
+                </div>
+              </div>
             )}
+            
+            <SummaryDisplay logMessages={logMessages} />
           </div>
         </div>
       </section>

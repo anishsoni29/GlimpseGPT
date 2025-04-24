@@ -1,16 +1,27 @@
 import os
-import base64
+import sys
+import json
+import traceback
+import tempfile
 import logging
 import re
-import json
-from typing import Optional, Union, Dict, Any
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends, Body, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydub import AudioSegment
-import tempfile
-import traceback
+import yt_dlp
+import asyncio
 import time
+import base64
+from typing import Optional, List, Dict, Any, Union
+from fastapi import FastAPI, File, Form, UploadFile, Request, Response, HTTPException, Query, Depends, Body
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydub import AudioSegment
+from io import StringIO, BytesIO
+from datetime import datetime
+
+# Set the TOKENIZERS_PARALLELISM environment variable to avoid warnings
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from main import (
     download_audio,
     audio_to_text,
@@ -41,6 +52,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Set up logging with a custom handler that stores recent logs
+class MemoryLogHandler(logging.Handler):
+    def __init__(self, capacity=200):  # Increased capacity
+        super().__init__()
+        self.capacity = capacity
+        self.logs = []
+        self.formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    def emit(self, record):
+        log_entry = self.formatter.format(record)
+        self.logs.append(log_entry)
+        # Keep only the most recent logs
+        if len(self.logs) > self.capacity:
+            self.logs.pop(0)
+
+# Create memory handler
+memory_handler = MemoryLogHandler()
+memory_handler.setLevel(logging.INFO)
+
+# Add it to the root logger
+logging.getLogger().addHandler(memory_handler)
+
+# Add it to our logger
+logger.addHandler(memory_handler)
+
+# Now all log messages will be stored in memory_handler.logs
 
 # Validate YouTube URL and extract ID
 def validate_youtube_url(url: str) -> str:
@@ -121,24 +159,26 @@ async def summarize(
         
         # Process YouTube URL
         if url:
-            logger.info(f"Validating YouTube URL: {url}")
+            logger.info(f"Processing request with URL: {url}, Language: {language}")
+            
             try:
-                # Validate and extract YouTube ID
+                # Validate the YouTube URL and extract the video ID
+                logger.info(f"Validating YouTube URL: {url}")
                 video_id = validate_youtube_url(url)
                 logger.info(f"Extracted YouTube video ID: {video_id}")
-                standard_url = f"https://www.youtube.com/watch?v={video_id}"
                 
-                # Download audio
-                logger.info(f"Downloading audio from YouTube ID: {video_id}")
-                logger.info("Progress update: Downloading audio content")
                 try:
-                    audio_file = download_audio(standard_url)
+                    # Download the audio for the YouTube video
+                    logger.info(f"Downloading audio from YouTube ID: {video_id}")
+                    logger.info("Progress update: Downloading audio content")
+                    audio_file = download_audio(url)
                     logger.info(f"Downloaded audio file: {audio_file}")
+                    logger.info("Progress update: Audio download complete")
                 except Exception as e:
                     logger.error(f"Failed to download audio: {str(e)}")
                     return JSONResponse(
                         status_code=500,
-                        content={"detail": f"Failed to download audio: {str(e)}"}
+                        content={"detail": f"Failed to download audio from YouTube: {str(e)}"}
                     )
             except ValueError as ve:
                 logger.error(f"Invalid YouTube URL: {str(ve)}")
@@ -154,10 +194,21 @@ async def summarize(
                 )
             
             try:
+                # Transcribe the audio file
                 logger.info(f"Transcribing audio from: {audio_file}")
                 logger.info("Progress update: Transcribing audio to text")
-                original_text = audio_to_text(audio_file)
-                logger.info(f"Transcribed text length: {len(original_text)} characters")
+                
+                # Add interim progress updates
+                for milestone in [25, 50, 75]:
+                    await asyncio.sleep(0.5)  # Small delay to space out logs
+                    logger.info(f"Progress update: Transcription {milestone}% complete")
+                
+                transcription_result = audio_to_text(audio_file)
+                original_text = transcription_result["full_text"]
+                transcript_segments = transcription_result["segments"]
+                
+                logger.info(f"Transcribed text length: {len(original_text)} characters, with {len(transcript_segments)} segments")
+                logger.info("Progress update: Transcription complete")
                 
                 # If we got no transcribed text, return an error
                 if not original_text.strip():
@@ -193,8 +244,13 @@ async def summarize(
                 
                 logger.info(f"Saved uploaded file to temp path: {temp_path}")
                 try:
-                    original_text = audio_to_text(temp_path)
-                    logger.info(f"Transcribed text length: {len(original_text)} characters")
+                    transcription_result = audio_to_text(temp_path)
+                    
+                    # Extract full text and segments
+                    original_text = transcription_result["full_text"]
+                    transcript_segments = transcription_result["segments"]
+                    
+                    logger.info(f"Transcribed text length: {len(original_text)} characters, with {len(transcript_segments)} segments")
                 except Exception as e:
                     logger.error(f"Failed to transcribe audio: {str(e)}")
                     return JSONResponse(
@@ -227,8 +283,27 @@ async def summarize(
         logger.info("Generating summary")
         logger.info("Progress update: Generating summary of content")
         try:
+            # Add interim progress updates for summarization
+            await asyncio.sleep(0.3)
+            logger.info("Progress update: Analyzing transcript content")
+            await asyncio.sleep(0.3)
+            logger.info("Progress update: Identifying key points")
+            
             summary_en = summarize_text(original_text)
+            
             logger.info(f"Summary generated, length: {len(summary_en)} characters")
+            logger.info("Progress update: Summary generation complete")
+            
+            # Validate summary content
+            if not summary_en or len(summary_en.strip()) == 0:
+                logger.error("Generated summary is empty")
+                return JSONResponse(
+                    status_code=500,
+                    content={"detail": "Failed to generate a meaningful summary from the content"}
+                )
+                
+            # Log summary for debugging (only in development)
+            logger.info(f"Summary content preview: {summary_en[:100]}...")
         except Exception as e:
             logger.error(f"Failed to summarize text: {str(e)}")
             return JSONResponse(
@@ -242,8 +317,12 @@ async def summarize(
             logger.info(f"Translating to {language} ({target_language_code})")
             logger.info("Progress update: Translating summary")
             try:
+                await asyncio.sleep(0.3)
+                logger.info("Progress update: Processing translation")
+                
                 summary_translated = translate_text(summary_en, target_language_code)
                 logger.info(f"Translation complete, length: {len(summary_translated)} characters")
+                logger.info("Progress update: Translation complete")
             except Exception as e:
                 logger.error(f"Failed to translate summary: {str(e)}")
                 # Fall back to English summary if translation fails
@@ -256,10 +335,14 @@ async def summarize(
         logger.info("Analyzing sentiment")
         logger.info("Progress update: Performing sentiment analysis")
         try:
+            await asyncio.sleep(0.3)
+            logger.info("Progress update: Evaluating sentiment patterns")
+            
             sentiment_result = sentiment_pipeline(summary_en)
             sentiment_label = sentiment_result[0]["label"]
             sentiment_score = sentiment_result[0]["score"]
             logger.info(f"Sentiment analysis complete: {sentiment_label} ({sentiment_score})")
+            logger.info("Progress update: Sentiment analysis complete")
         except Exception as e:
             logger.error(f"Failed to analyze sentiment: {str(e)}")
             # Provide default sentiment values if analysis fails
@@ -276,15 +359,43 @@ async def summarize(
             "sentiment": {
                 "label": sentiment_label,
                 "score": sentiment_score
-            }
+            },
+            "transcript_segments": transcript_segments
         }
         
+        # Log response structure (without full content) for debugging
+        logger.info(f"Response structure: keys={list(response_data.keys())}")
+        logger.info(f"Summary length: original={len(summary_en)}, translated={len(summary_translated)}")
+        
+        # Additional metadata if available from YouTube
+        if url:
+            try:
+                # Try to extract thumbnail and title
+                with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+                    video_info = ydl.extract_info(url, download=False)
+                    
+                    if video_info:
+                        # Get best thumbnail
+                        thumbnails = video_info.get('thumbnails', [])
+                        thumbnails.sort(key=lambda x: x.get('height', 0) * x.get('width', 0), reverse=True)
+                        
+                        if thumbnails:
+                            response_data["thumbnail_url"] = thumbnails[0]['url']
+                        
+                        # Get title
+                        if 'title' in video_info:
+                            response_data["title"] = video_info['title']
+            except Exception as e:
+                logger.warning(f"Could not extract additional metadata: {str(e)}")
+        
         logger.info("Successfully processed request, returning response")
+        logger.info("Progress update: Processing complete")
         return JSONResponse(content=response_data)
     
     except Exception as e:
         logger.error(f"Unhandled exception in summarize endpoint: {str(e)}")
         logger.error(traceback.format_exc())
+        logger.info("Progress update: Processing failed with error")
         return JSONResponse(
             status_code=500,
             content={"detail": f"An error occurred while processing the request: {str(e)}"}
@@ -298,6 +409,24 @@ async def global_exception_handler(request, exc):
         status_code=500,
         content={"detail": f"Server error: {str(exc)}"},
     )
+
+@app.get("/api/logs")
+async def get_logs():
+    """
+    Return the most recent logs from the application.
+    """
+    try:
+        recent_logs = memory_handler.logs
+        progress_updates = [log for log in recent_logs if "Progress update" in log]
+        return {
+            "logs": recent_logs,
+            "progress": progress_updates[-5:] if progress_updates else [],
+            "count": len(recent_logs),
+            "last_updated": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving logs: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve logs: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

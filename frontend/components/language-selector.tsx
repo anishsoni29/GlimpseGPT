@@ -16,6 +16,8 @@ import {
   SelectValue 
 } from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
+import { getUserPreferences, saveUserPreferences } from "../../backend/lib/supabase";
+import { useAuth } from "@/lib/auth-context";
 
 const languages = [
   { code: "English", name: "English", flag: "🇺🇸" },
@@ -27,18 +29,60 @@ const languages = [
 export function LanguageSelector() {
   const [selectedLanguage, setSelectedLanguage] = useState("English");
   const [isOpen, setIsOpen] = useState(false);
+  const { user } = useAuth();
+  const userId = user?.id || 'anonymous';
 
   // Load saved language preference on mount
   useEffect(() => {
-    const savedLanguage = localStorage.getItem('preferredLanguage');
-    if (savedLanguage) {
-      setSelectedLanguage(savedLanguage);
-    }
-  }, []);
+    const loadLanguagePreference = async () => {
+      // Try to get from Supabase only if user is authenticated
+      if (user) {
+        const { data, error } = await getUserPreferences(userId);
+        
+        if (error) {
+          console.error('Failed to load language preference from database', error);
+          // Fall back to localStorage
+          const savedLanguage = localStorage.getItem('preferredLanguage');
+          if (savedLanguage) {
+            setSelectedLanguage(savedLanguage);
+          }
+          return;
+        }
+        
+        if (data && data.preferred_language) {
+          setSelectedLanguage(data.preferred_language);
+        }
+      } else {
+        // For non-authenticated users, use localStorage
+        const savedLanguage = localStorage.getItem('preferredLanguage');
+        if (savedLanguage) {
+          setSelectedLanguage(savedLanguage);
+        }
+      }
+    };
+    
+    loadLanguagePreference();
+  }, [userId, user]);
 
   // Handle language change
-  const handleLanguageChange = (value: string) => {
+  const handleLanguageChange = async (value: string) => {
     setSelectedLanguage(value);
+    
+    // Save to Supabase only if user is authenticated
+    if (user) {
+      const preferenceData = {
+        user_id: userId,
+        preferred_language: value
+      };
+      
+      const { error } = await saveUserPreferences(preferenceData);
+      
+      if (error) {
+        console.error('Failed to save language preference to database', error);
+      }
+    }
+    
+    // Always save to localStorage as fallback
     localStorage.setItem('preferredLanguage', value);
     
     // Notify other components about the language change
@@ -51,7 +95,7 @@ export function LanguageSelector() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
-        className="backdrop-blur-xl bg-black/30 p-6 rounded-xl border border-white/10 shadow-xl"
+        className="backdrop-blur-xl dark:bg-black/30 bg-white border border-border dark:border-white/10 shadow-xl p-6 rounded-xl"
       >
         <div className="flex items-center gap-3 mb-4">
           <motion.div 
@@ -62,12 +106,12 @@ export function LanguageSelector() {
           >
             <Languages className="h-5 w-5 text-indigo-400" />
           </motion.div>
-          <span className="text-lg font-semibold text-white">Translation Language</span>
+          <span className="text-lg font-semibold text-foreground dark:text-white">Translation Language</span>
         </div>
         
         <Select value={selectedLanguage} onValueChange={handleLanguageChange}>
           <SelectTrigger 
-            className="w-full bg-black/40 border-white/10 text-white backdrop-blur-md transition-all hover:bg-black/60 focus:ring-indigo-500/50"
+            className="w-full dark:bg-black/40 bg-white/80 border-border dark:border-white/10 text-foreground dark:text-white backdrop-blur-md transition-all hover:bg-muted dark:hover:bg-black/60 focus:ring-primary/50"
             onClick={() => setIsOpen(!isOpen)}
           >
             <SelectValue>
@@ -78,7 +122,7 @@ export function LanguageSelector() {
             </SelectValue>
           </SelectTrigger>
           
-          <SelectContent className="bg-black/80 backdrop-blur-xl border-white/10 text-white">
+          <SelectContent className="dark:bg-black/80 bg-white backdrop-blur-xl border-border dark:border-white/10 text-foreground dark:text-white">
             <SelectGroup>
               {languages.map((language) => (
                 <SelectItem 
@@ -101,7 +145,7 @@ export function LanguageSelector() {
           </SelectContent>
         </Select>
         
-        <p className="text-white/60 text-sm mt-4">
+        <p className="text-muted-foreground dark:text-white/60 text-sm mt-4">
           Choose the language for your summaries and analysis
         </p>
         
@@ -112,7 +156,7 @@ export function LanguageSelector() {
         >
           <a 
             href="#demo" 
-            className="flex items-center gap-2 text-indigo-400 hover:text-indigo-300 transition-colors group"
+            className="flex items-center gap-2 text-primary dark:text-indigo-400 hover:text-primary/80 dark:hover:text-indigo-300 transition-colors group"
           >
             <span>Try it now</span>
             <motion.div
