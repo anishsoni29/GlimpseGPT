@@ -13,6 +13,10 @@ import matplotlib
 from dotenv import load_dotenv
 import json
 import logging
+import uuid
+import tempfile
+from supabase import create_client, Client
+from io import BytesIO
 matplotlib.use('Agg')  # Force non-interactive backend
 import matplotlib.pyplot as plt
 
@@ -22,6 +26,34 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables for optional customization
 load_dotenv()
+
+# Initialize Supabase client
+supabase_url = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+supabase_key = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+bucket_name = os.getenv("SUPABASE_BUCKET_NAME", "audio-files")
+
+# Create supabase client
+try:
+    if supabase_url and supabase_key:
+        supabase: Client = create_client(supabase_url, supabase_key)
+        logger.info("Supabase client initialized")
+        
+        # Check if bucket exists, if not create it
+        try:
+            buckets = supabase.storage.list_buckets()
+            bucket_exists = any(bucket.name == bucket_name for bucket in buckets)
+            
+            if not bucket_exists:
+                supabase.storage.create_bucket(bucket_name, {'public': True})
+                logger.info(f"Created Supabase bucket: {bucket_name}")
+        except Exception as e:
+            logger.warning(f"Could not verify or create bucket: {str(e)}")
+    else:
+        logger.warning("Supabase credentials not found in environment variables")
+        supabase = None
+except Exception as e:
+    logger.error(f"Failed to initialize Supabase client: {str(e)}")
+    supabase = None
 
 # Initialize translation model and tokenizer
 translator_model_name = "facebook/m2m100_418M"
@@ -79,15 +111,35 @@ except Exception as e:
     logger.warning(f"Could not load fallback summarization model: {str(e)}")
     fallback_summarizer = None
 
-# Function to download YouTube audio
+# Helper function to clean up temporary files
+def cleanup_temp_files(file_path):
+    """
+    Safely remove a temporary file if it exists
+    """
+    if file_path and os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+            logger.info(f"Removed temporary file: {file_path}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to remove temporary file {file_path}: {str(e)}")
+            return False
+    return False
+
+# Function to download YouTube audio and store in Supabase
 def download_audio(url, output_path="audio"):
+    temp_audio_file = None
     try:
-        # Ensure output directory exists
-        os.makedirs(os.path.abspath(output_path), exist_ok=True)
+        # Generate a unique ID for the audio file
+        video_id = None
+        
+        # Create a temporary directory for downloading
+        temp_dir = os.path.join(tempfile.gettempdir(), "audio_temp")
+        os.makedirs(temp_dir, exist_ok=True)
         
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': os.path.join(output_path, '%(id)s.%(ext)s'),
+            'outtmpl': os.path.join(temp_dir, '%(id)s.%(ext)s'),
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -97,15 +149,108 @@ def download_audio(url, output_path="audio"):
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(url, download=True)
-            video_id = info_dict.get('id', 'audio')
-            audio_file = os.path.join(output_path, f"{video_id}.mp3")
-            return audio_file
+            video_id = info_dict.get('id', None)
+            
+            if not video_id:
+                video_id = str(uuid.uuid4())
+                
+            temp_audio_file = os.path.join(temp_dir, f"{video_id}.mp3")
+            
+            # Check if the file exists
+            if not os.path.exists(temp_audio_file):
+                logger.error(f"Downloaded audio file not found at {temp_audio_file}")
+                raise Exception(f"Downloaded audio file not found at {temp_audio_file}")
+            
+            # If Supabase is configured, upload to Supabase
+            if supabase:
+                try:
+                    # Read the file content
+                    with open(temp_audio_file, 'rb') as f:
+                        file_content = f.read()
+                    
+                    # Upload to Supabase storage
+                    supabase_path = f"{video_id}.mp3"
+                    result = supabase.storage.from_(bucket_name).upload(
+                        path=supabase_path,
+                        file=file_content,
+                        file_options={"content-type": "audio/mpeg"},
+                        is_upsert=True
+                    )
+                    
+                    # Get the public URL
+                    public_url = supabase.storage.from_(bucket_name).get_public_url(supabase_path)
+                    logger.info(f"Audio uploaded to Supabase: {public_url}")
+                    
+                    # Return the Supabase URL and video ID
+                    return {
+                        "local_path": temp_audio_file,  # Temporary local path
+                        "supabase_path": supabase_path,  # Path in Supabase
+                        "public_url": public_url,        # Public URL
+                        "video_id": video_id             # Video ID
+                    }
+                except Exception as e:
+                    logger.error(f"Failed to upload to Supabase: {str(e)}")
+                    # If upload to Supabase fails, save locally as fallback
+                    os.makedirs(os.path.abspath(output_path), exist_ok=True)
+                    local_path = os.path.join(output_path, f"{video_id}.mp3")
+                    import shutil
+                    shutil.copy(temp_audio_file, local_path)
+                    logger.info(f"Audio saved locally as fallback: {local_path}")
+                    return {
+                        "local_path": local_path,
+                        "video_id": video_id
+                    }
+            else:
+                # If Supabase is not configured, save locally
+                os.makedirs(os.path.abspath(output_path), exist_ok=True)
+                local_path = os.path.join(output_path, f"{video_id}.mp3")
+                import shutil
+                shutil.copy(temp_audio_file, local_path)
+                logger.info(f"Audio saved locally (Supabase not configured): {local_path}")
+                return {
+                    "local_path": local_path,
+                    "video_id": video_id
+                }
     except Exception as e:
+        # Clean up any temp files before raising the exception
+        if temp_audio_file:
+            cleanup_temp_files(temp_audio_file)
         raise Exception(f"Failed to download audio: {str(e)}")
 
 # Function to convert audio to text with improved accuracy
-def audio_to_text(audio_file, chunk_duration=15):
+def audio_to_text(audio_file_or_info, chunk_duration=15):
+    temp_file = None
     try:
+        # Handle both string paths and dictionaries with file info
+        if isinstance(audio_file_or_info, dict):
+            # Use local_path from the dictionary
+            audio_file = audio_file_or_info.get("local_path")
+            if not audio_file:
+                # If no local_path, try to download from Supabase
+                if supabase and "supabase_path" in audio_file_or_info:
+                    try:
+                        supabase_path = audio_file_or_info["supabase_path"]
+                        # Download from Supabase to a temporary file
+                        temp_file = os.path.join(tempfile.gettempdir(), f"temp_{uuid.uuid4()}.mp3")
+                        
+                        # Get the file from Supabase
+                        file_data = supabase.storage.from_(bucket_name).download(supabase_path)
+                        
+                        # Save to temporary file
+                        with open(temp_file, 'wb') as f:
+                            f.write(file_data)
+                        
+                        audio_file = temp_file
+                        logger.info(f"Downloaded audio from Supabase to {audio_file}")
+                    except Exception as e:
+                        if temp_file:
+                            cleanup_temp_files(temp_file)
+                        raise Exception(f"Failed to download audio from Supabase: {str(e)}")
+                else:
+                    raise Exception("No valid audio file information provided")
+        else:
+            audio_file = audio_file_or_info
+
         # Check if file exists
         if not os.path.exists(audio_file):
             raise Exception(f"Audio file not found: {audio_file}")
@@ -201,11 +346,19 @@ def audio_to_text(audio_file, chunk_duration=15):
             except:
                 pass
             
+        # Cleanup temporary files at the end
+        if temp_file:
+            cleanup_temp_files(temp_file)
+        
+        # Return transcription result
         return {
             "full_text": full_transcript.strip(),
             "segments": transcript_segments
         }
     except Exception as e:
+        # Clean up temp file if there's an error
+        if temp_file:
+            cleanup_temp_files(temp_file)
         logger.error(f"Transcription error: {str(e)}")
         raise Exception(f"Failed to convert audio to text: {str(e)}")
 
