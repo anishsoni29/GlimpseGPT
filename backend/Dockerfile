@@ -38,6 +38,10 @@ EXPOSE 8000
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV TOKENIZERS_PARALLELISM=false
+ENV PYTHONPATH=/app
+
+# Create a directory for temporary files if needed
+RUN mkdir -p /app/temp
 
 # Start the FastAPI server with uvicorn
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"] 
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"] 
