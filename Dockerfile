@@ -1,8 +1,8 @@
 FROM python:3.10-slim
 
-WORKDIR /app
+WORKDIR /app/backend
 
-# Install system dependencies required for PyTorch, audio processing and ffmpeg
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
     ffmpeg \
@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js for supabase-js
+# Install Node.js
 RUN apt-get update && apt-get install -y \
     curl \
     && curl -sL https://deb.nodesource.com/setup_18.x | bash - \
@@ -21,27 +21,23 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
+# Copy and install Python dependencies
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy package.json and install Node dependencies
-COPY package.json package-lock.json* ./
+# Copy and install Node dependencies
+COPY backend/package.json backend/package-lock.json* ./
 RUN npm install
 
-# Copy the rest of the application
-COPY . .
+# Copy the app code
+COPY backend/ .
 
-# Expose the port FastAPI will run on
 EXPOSE 8000
 
-# Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV TOKENIZERS_PARALLELISM=false
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/backend
 
-# Create a directory for temporary files if needed
 RUN mkdir -p /app/temp
 
-# Start the FastAPI server with uvicorn
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"] 
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
