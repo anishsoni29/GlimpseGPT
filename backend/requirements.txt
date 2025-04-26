@@ -12,3 +12,4 @@ python-dotenv==1.0.0
 sentencepiece==0.1.99
 tokenizers==0.15.0
 accelerate==0.25.0 
+supabase==1.0.3
