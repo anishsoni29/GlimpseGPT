@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { 
   FileAudio,
   FileVideo,
@@ -18,6 +18,7 @@ import { StatusIndicator } from "@/components/ui/status-indicator";
 
 // Define backend URL
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+const WS_URL = BACKEND_URL.replace('http', 'ws');
 
 export function VideoUpload() {
   const [url, setUrl] = useState("");
@@ -27,6 +28,7 @@ export function VideoUpload() {
   const { toast } = useToast();
   const [statusMessage, setStatusMessage] = useState("");
   const [statusType, setStatusType] = useState<"info" | "success" | "error" | "warning" | "loading" | "default">("default");
+  const wsRef = useRef<WebSocket | null>(null);
 
   // Progress mapping for backend steps
   const progressMap = {
@@ -37,6 +39,117 @@ export function VideoUpload() {
     "Sentiment analysis": 90,
     "Finalizing": 95
   };
+
+  const logProcessingEvent = (message: string) => {
+    console.log(`Processing: ${message}`);
+    // Emit a custom event for the processing logs component
+    const event = new CustomEvent('processingLog', { detail: message });
+    window.dispatchEvent(event);
+    
+    // Update status message based on the log
+    const lowerMessage = message.toLowerCase();
+    if (lowerMessage.includes("download")) {
+      setStatusMessage("Downloading...");
+    } else if (lowerMessage.includes("transcrib")) {
+      setStatusMessage("Transcribing...");
+    } else if (lowerMessage.includes("summary")) {
+      setStatusMessage("Generating summary...");
+    } else if (lowerMessage.includes("translat")) {
+      setStatusMessage("Translating...");
+    } else if (lowerMessage.includes("sentiment")) {
+      setStatusMessage("Analyzing sentiment...");
+    } else if (lowerMessage.includes("finaliz")) {
+      setStatusMessage("Finalizing...");
+    }
+  };
+
+  // Initialize WebSocket connection
+  useEffect(() => {
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 5;
+    const getReconnectDelay = (attempt: number) => Math.min(1000 * Math.pow(2, attempt), 10000);
+    
+    const connectWebSocket = () => {
+      if (reconnectAttempts >= maxReconnectAttempts) {
+        console.log('Max reconnection attempts reached');
+        return;
+      }
+      
+      const ws = new WebSocket(`${WS_URL}/ws/logs`);
+      
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        reconnectAttempts = 0; // Reset attempts on successful connection
+      };
+      
+      ws.onmessage = (event) => {
+        if (!isProcessing) return;
+        
+        try {
+          const data = JSON.parse(event.data);
+          const message = data.message.toLowerCase();
+          
+          // Always increment progress slightly for any log message to show activity
+          setProgress(prev => Math.min(prev + 0.5, 95));
+          
+          // Update progress based on log message content
+          if (message.includes("download") && progress < progressMap["Downloading"]) {
+            setProgress(progressMap["Downloading"]);
+            setStatusMessage("Downloading...");
+          } else if (message.includes("transcrib") && progress < progressMap["Transcribing"]) {
+            setProgress(progressMap["Transcribing"]);
+            setStatusMessage("Transcribing...");
+          } else if (message.includes("summary") && progress < progressMap["Generating summary"]) {
+            setProgress(progressMap["Generating summary"]);
+            setStatusMessage("Generating summary...");
+          } else if (message.includes("translat") && progress < progressMap["Translating"]) {
+            setProgress(progressMap["Translating"]);
+            setStatusMessage("Translating...");
+          } else if (message.includes("sentiment") && progress < progressMap["Sentiment analysis"]) {
+            setProgress(progressMap["Sentiment analysis"]);
+            setStatusMessage("Analyzing sentiment...");
+          } else if (message.includes("finaliz") && progress < progressMap["Finalizing"]) {
+            setProgress(progressMap["Finalizing"]);
+            setStatusMessage("Finalizing...");
+          }
+          
+          // Emit a custom event for the processing logs component
+          const customEvent = new CustomEvent('processingLog', { detail: data.message });
+          window.dispatchEvent(customEvent);
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+        }
+      };
+      
+      ws.onclose = () => {
+        console.log('WebSocket disconnected. Attempting to reconnect...');
+        const reconnectDelay = getReconnectDelay(reconnectAttempts);
+        reconnectAttempts++;
+        
+        if (reconnectAttempts < maxReconnectAttempts) {
+          console.log(`Reconnecting in ${reconnectDelay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+          setTimeout(connectWebSocket, reconnectDelay);
+        } else {
+          console.log('Max reconnection attempts reached');
+        }
+      };
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        // Don't attempt to reconnect here, let onclose handle it
+      };
+      
+      wsRef.current = ws;
+    };
+    
+    connectWebSocket();
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [isProcessing, progress]);
 
   // Auto increment progress to avoid stagnant progress bar
   useEffect(() => {
@@ -147,51 +260,6 @@ export function VideoUpload() {
       window.removeEventListener('reprocessVideo', handleReprocessVideo as EventListener);
     };
   }, []);
-
-  // Listen for processing logs to update progress
-  useEffect(() => {
-    const updateProgressFromLogs = (event: CustomEvent<string>) => {
-      if (!isProcessing) return;
-      
-      const message = event.detail.toLowerCase();
-      
-      // Always increment progress slightly for any log message to show activity
-      setProgress(prev => Math.min(prev + 0.5, 95));
-      
-      // Update progress based on log message content
-      if (message.includes("download") && progress < progressMap["Downloading"]) {
-        setProgress(progressMap["Downloading"]);
-        setStatusMessage("Downloading...");
-      } else if (message.includes("transcrib") && progress < progressMap["Transcribing"]) {
-        setProgress(progressMap["Transcribing"]);
-        setStatusMessage("Transcribing...");
-      } else if (message.includes("summary") && progress < progressMap["Generating summary"]) {
-        setProgress(progressMap["Generating summary"]);
-        setStatusMessage("Generating summary...");
-      } else if (message.includes("translat") && progress < progressMap["Translating"]) {
-        setProgress(progressMap["Translating"]);
-        setStatusMessage("Translating...");
-      } else if (message.includes("sentiment") && progress < progressMap["Sentiment analysis"]) {
-        setProgress(progressMap["Sentiment analysis"]);
-        setStatusMessage("Analyzing sentiment...");
-      } else if (message.includes("finaliz") && progress < progressMap["Finalizing"]) {
-        setProgress(progressMap["Finalizing"]);
-        setStatusMessage("Finalizing...");
-      }
-    };
-    
-    window.addEventListener('processingLog', updateProgressFromLogs as EventListener);
-    return () => {
-      window.removeEventListener('processingLog', updateProgressFromLogs as EventListener);
-    };
-  }, [isProcessing, progress]);
-
-  const logProcessingEvent = (message: string) => {
-    console.log(`Processing: ${message}`);
-    // Emit a custom event for the processing logs component
-    const event = new CustomEvent('processingLog', { detail: message });
-    window.dispatchEvent(event);
-  };
 
   // Function to process API response and validate summary
   const processApiResponse = (data: any) => {

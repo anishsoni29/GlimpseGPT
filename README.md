@@ -11,6 +11,7 @@ A powerful video and audio summarization tool with sentiment analysis and multil
 - Analyze sentiment in the text using RoBERTa-based models
 - Text-to-speech functionality
 - Clean, responsive UI with light and dark modes
+- MongoDB integration for persistent storage of transcripts, summaries, and metadata
 
 ## Project Structure
 
@@ -18,6 +19,24 @@ A powerful video and audio summarization tool with sentiment analysis and multil
 - `frontend/`: Next.js frontend with a clean UI for user interaction
 
 ## Setup Instructions
+
+### MongoDB Setup
+
+1. Install MongoDB Community Edition:
+   - On macOS with Homebrew: `brew tap mongodb/brew && brew install mongodb-community`
+   - On Windows/Linux: Follow the [official MongoDB installation guide](https://www.mongodb.com/docs/manual/installation/)
+
+2. Start MongoDB service:
+   - On macOS: `brew services start mongodb-community`
+   - On Windows: MongoDB runs as a service by default
+   - On Linux: `sudo systemctl start mongod`
+
+3. Configure MongoDB:
+   - Create a `.env` file in the backend directory with:
+     ```
+     MONGODB_URI=mongodb://localhost:27017
+     DATABASE_NAME=glimpse-db
+     ```
 
 ### Backend Setup
 
@@ -40,9 +59,8 @@ A powerful video and audio summarization tool with sentiment analysis and multil
    pip install -r requirements.txt
    ```
 
-5. (Optional) Set up environment variables:
-   - Create a `.env` file in the backend directory
-   - You can customize settings here, but no API keys are required
+5. Set up environment variables:
+   - Create a `.env` file in the backend directory (see MongoDB Setup section)
 
 6. Run the FastAPI server:
    ```
@@ -81,6 +99,14 @@ The frontend will be available at http://localhost:3000
 7. Use the built-in text-to-speech to listen to the summary
 8. Toggle between light and dark modes using the theme switcher
 
+## API Endpoints
+
+### Main Endpoints
+- `POST /api/summarize`: Process a video/audio file and generate summary
+- `GET /api/transcript/{video_id}`: Get transcript for a specific video
+- `GET /api/summary/{video_id}`: Get summary for a specific video
+- `GET /api/metadata/{video_id}`: Get audio metadata for a specific video
+
 ## Transformer-Powered Summarization
 
 The application uses a tiered approach to summarization with multiple Hugging Face transformer models:
@@ -99,6 +125,7 @@ Additional features include:
 - Sentiment analysis using `cardiffnlp/twitter-roberta-base-sentiment`
 - Multilingual translation with Facebook's `m2m100_418M` model
 - Speech recognition with improved segmentation and timestamps
+- Persistent storage with MongoDB for all processed data
 
 ## License
 

@@ -7,16 +7,19 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
+const WS_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000').replace('http', 'ws');
+
 interface ProcessingLogsProps {
   messages: string[];
 }
 
 export function ProcessingLogs({ messages: initialMessages }: ProcessingLogsProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const [messages, setMessages] = useState<string[]>(initialMessages);
   const [backendLogs, setBackendLogs] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'frontend' | 'backend'>('backend'); // Default to backend logs
+  const [activeTab, setActiveTab] = useState<'frontend' | 'backend'>('backend');
   
   useEffect(() => {
     // Auto-scroll to bottom on new messages
@@ -30,42 +33,65 @@ export function ProcessingLogs({ messages: initialMessages }: ProcessingLogsProp
     setMessages(initialMessages);
   }, [initialMessages]);
 
-  // Function to fetch logs from backend
-  const fetchBackendLogs = async () => {
-    try {
-      setIsLoading(true);
-      const response = await fetch('/api/logs');
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data.logs)) {
-          // Check if we have new logs
-          const hasNewLogs = data.logs.length > backendLogs.length;
-          setBackendLogs(data.logs);
+  // Initialize WebSocket connection
+  useEffect(() => {
+    const connectWebSocket = () => {
+      const ws = new WebSocket(`${WS_URL}/ws/logs`);
+      
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        setIsLoading(false);
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          setBackendLogs(prev => {
+            const newLogs = [...prev, data.message];
+            // Keep only the last 100 logs to prevent memory issues
+            if (newLogs.length > 100) {
+              return newLogs.slice(-100);
+            }
+            return newLogs;
+          });
           
-          // If there are backend logs, dispatch them as events to be picked up by the frontend
-          if (data.logs.length > 0 && hasNewLogs) {
-            // Get the last message that hasn't been seen in frontend logs
-            const lastMessage = data.logs[data.logs.length - 1];
-            // Dispatch the event so it can be picked up by the app
-            const event = new CustomEvent('processingLog', { detail: lastMessage });
-            window.dispatchEvent(event);
-          }
+          // Dispatch the event so it can be picked up by other components
+          const customEvent = new CustomEvent('processingLog', { detail: data.message });
+          window.dispatchEvent(customEvent);
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
         }
+      };
+      
+      ws.onclose = () => {
+        console.log('WebSocket disconnected. Reconnecting...');
+        setTimeout(connectWebSocket, 1000);
+      };
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setIsLoading(true);
+      };
+      
+      wsRef.current = ws;
+    };
+    
+    connectWebSocket();
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
       }
-    } catch (error) {
-      console.error('Failed to fetch backend logs:', error);
-    } finally {
-      setIsLoading(false);
+    };
+  }, []);
+
+  // Function to manually refresh connection
+  const refreshConnection = () => {
+    setIsLoading(true);
+    if (wsRef.current) {
+      wsRef.current.close();
     }
   };
-
-  // Set up polling for backend logs
-  useEffect(() => {
-    fetchBackendLogs();
-    const interval = setInterval(fetchBackendLogs, 1000); // Poll every second for more responsive updates
-    
-    return () => clearInterval(interval);
-  }, []);
 
   // Function to format log messages with appropriate icons and styles
   const formatMessage = (message: string, index: number, source: 'frontend' | 'backend') => {
@@ -160,7 +186,7 @@ export function ProcessingLogs({ messages: initialMessages }: ProcessingLogsProp
             size="icon" 
             variant="outline" 
             className="h-7 w-7 border border-border/40" 
-            onClick={fetchBackendLogs}
+            onClick={refreshConnection}
             disabled={isLoading}
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
@@ -198,20 +224,10 @@ export function ProcessingLogs({ messages: initialMessages }: ProcessingLogsProp
       
       <ScrollArea className="h-[160px] p-2 bg-card/30" ref={scrollRef}>
         <div className="space-y-0.5 p-2">
-          {activeTab === 'frontend' ? (
-            messages.length > 0 ? 
-              messages.map((message, index) => formatMessage(message, index, 'frontend')) :
-              <div className="flex items-center justify-center h-[120px] text-muted-foreground">
-                No frontend logs yet.
-              </div>
-          ) : (
-            backendLogs.length > 0 ?
-              backendLogs.map((message, index) => formatMessage(message, index, 'backend')) :
-              <div className="flex items-center justify-center h-[120px] text-muted-foreground">
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Waiting for backend logs...
-              </div>
-          )}
+          {activeTab === 'frontend' ? 
+            messages.map((msg, i) => formatMessage(msg, i, 'frontend')) :
+            backendLogs.map((msg, i) => formatMessage(msg, i, 'backend'))
+          }
         </div>
       </ScrollArea>
     </Card>
