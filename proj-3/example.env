@@ -1,0 +1,3 @@
+GEMINI_API_KEY=your_api
+GROQ_API_KEY=your_groq_api_key_here
+OPENAI_API_KEY=your_api
