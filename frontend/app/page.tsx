@@ -115,7 +115,7 @@ export default function Home() {
           </nav>
 
           <div className="flex-1 md:flex-none flex items-center justify-end gap-2">
-            <a href="https://github.com/yourusername/glimpsegpt" target="_blank" rel="noreferrer">
+            <a href="https://github.com/anishsoni29/glimpsegpt" target="_blank" rel="noreferrer">
               <Button variant="ghost" size="icon">
                 <Github className="h-5 w-5" />
                 <span className="sr-only">GitHub</span>
